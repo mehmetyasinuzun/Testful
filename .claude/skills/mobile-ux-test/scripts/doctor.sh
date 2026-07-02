@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
+. "$(dirname "$0")/log.sh"
 ok=0; bad=0
-pass() { echo "[TAMAM] $1"; ok=$((ok+1)); }
-fail() { echo "[EKSİK] $1 -> $2"; bad=$((bad+1)); }
+pass() { qa_log "[TAMAM] $1"; ok=$((ok+1)); }
+fail() { qa_log "[EKSİK] $1 -> $2"; bad=$((bad+1)); }
 
-echo "=== Testful doctor ==="
+qa_log "=== Testful doctor ==="
 
 if command -v adb >/dev/null 2>&1; then ADB="adb"
 elif [ -x "$LOCALAPPDATA/Android/Sdk/platform-tools/adb.exe" ]; then ADB="$LOCALAPPDATA/Android/Sdk/platform-tools/adb.exe"
@@ -43,5 +44,5 @@ elif [ -f "$LOCALAPPDATA/Pub/Cache/bin/patrol.bat" ]; then P="$LOCALAPPDATA/Pub/
 else P=""; fi
 if [ -n "$P" ]; then pass "patrol_cli ($P)"; else fail "patrol_cli" "dart pub global activate patrol_cli"; fi
 
-echo "=== sonuç: $ok tamam, $bad eksik ==="
+qa_log "=== sonuç: $ok tamam, $bad eksik ==="
 [ "$bad" -eq 0 ]

@@ -1,0 +1,15 @@
+id: CORE-01
+title: Soğuk açılış — login ekranı çökmesiz açılır
+archetype: universal
+tier: core
+engine: maestro
+package: com.example.compass_app
+preconditions:
+  - reset-app
+  - "backend: compass_server 8080 portunda çalışıyor (dart run bin/compass_server.dart) ve `adb reverse tcp:8080 tcp:8080` uygulanmış"
+steps:
+  - do: launch
+    expect: "uygulama çökmeden açılır, token olmadığı için Login ekranına yönlenir ve 'Login' butonu görünür; üstteki kart görselleri harici internetten (rstr.in) gelir, yüklenmemiş/boş olması hata sayılmaz"
+    shot: true
+  - do: assert "email@example.com"
+    expect: "e-posta alanı 'email@example.com' değeriyle önceden dolu görünür"

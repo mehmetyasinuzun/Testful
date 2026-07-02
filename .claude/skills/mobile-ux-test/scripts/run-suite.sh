@@ -7,6 +7,7 @@
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 . "$HERE/env.sh"
+. "$HERE/log.sh"
 [ -n "$MAESTRO" ] || { echo "HATA: maestro yok (doctor.sh)"; exit 2; }
 
 APP_DIR="${1:?kullanım: run-suite.sh <app_dir> [id_glob]}"
@@ -16,7 +17,7 @@ cd "$APP_DIR"
 RUN="$(bash "$HERE/new-run.sh" .qa/results)"
 SHOTS="$RUN/screenshots"; LOGS="$RUN/logcat"
 RESULTS="$RUN/results.ndjson"; : > "$RESULTS"
-echo "run: $RUN"
+qa_log "run: $RUN (glob=$GLOB)"
 
 run_once() { # flow_path log_path -> exit code
   ( cd "$SHOTS" && "$MAESTRO" test "$1" ) > "$2" 2>&1
@@ -31,7 +32,7 @@ for flow in $(find .qa/scenarios -name '*.flow.yaml' ! -name '_*' | sort); do
   run_once "$APP_DIR/$flow" "$LOGS/$id-1.txt"; c1=$?
   if [ $c1 -eq 0 ]; then
     printf '{"id":"%s","result":"pass","confidence":"kesin","retries":0}\n' "$id" >> "$RESULTS"
-    echo "[PASS] $id"; continue
+    qa_log "[PASS] $id"; continue
   fi
   # başarısız → temiz durumda 2 tekrar
   passes=0
@@ -42,10 +43,10 @@ for flow in $(find .qa/scenarios -name '*.flow.yaml' ! -name '_*' | sort); do
   done
   if [ $passes -eq 0 ]; then
     printf '{"id":"%s","result":"fail","confidence":"kesin","retries":2}\n' "$id" >> "$RESULTS"
-    echo "[FAIL] $id (3/3)"
+    qa_log "[FAIL] $id (3/3)"
   else
     printf '{"id":"%s","result":"flaky","confidence":"flaky-suphesi","retries":2}\n' "$id" >> "$RESULTS"
-    echo "[FLAKY] $id (1.koşu fail, tekrarda $passes/2 geçti)"
+    qa_log "[FLAKY] $id (1.koşu fail, tekrarda $passes/2 geçti)"
   fi
 done
 
@@ -53,4 +54,4 @@ done
 [ -f "$APP_DIR/.qa/findings.seed.json" ] && cp "$APP_DIR/.qa/findings.seed.json" "$RUN/findings.extra.json"
 
 node "$HERE/report.mjs" "$RUN" "$APP_DIR"
-echo "rapor: $RUN/report.md"
+qa_log "rapor: $RUN/report.md"

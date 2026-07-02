@@ -4,7 +4,7 @@
 // Sürüş tamamen adb iledir (input tap/keyevent, uiautomator dump, screencap).
 // Kullanım: node explore.mjs <package> <run_dir> [maxActions=80]
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, writeFileSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 
@@ -16,7 +16,13 @@ const ADB = process.env.ADB || join(process.env.LOCALAPPDATA || '', 'Android/Sdk
 
 const screensDir = join(runDir, 'screens');
 const treesDir = join(runDir, 'trees');
-for (const d of [runDir, screensDir, treesDir]) mkdirSync(d, { recursive: true });
+const logDir = process.env.TESTFUL_LOG_DIR || '.qa/logs';
+for (const d of [runDir, screensDir, treesDir, logDir]) mkdirSync(d, { recursive: true });
+const logFile = join(logDir, `${new Date().toISOString().slice(0, 10)}.log`);
+const ql = (s) => {
+  console.log(s);
+  try { appendFileSync(logFile, `${new Date().toISOString().slice(0, 19)} ${s}\n`); } catch {}
+};
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const adb = (...a) => execFileSync(ADB, a, { maxBuffer: 32e6 });
@@ -137,7 +143,7 @@ async function observe() {
       order: Object.keys(graph.nodes).length + 1,
     };
     tried[sig] = new Set();
-    console.log(`[EKRAN ${graph.nodes[sig].order}] ${sig} — ${graph.nodes[sig].descs.slice(0, 4).join(' · ')}`);
+    ql(`[EKRAN ${graph.nodes[sig].order}] ${sig} — ${graph.nodes[sig].descs.slice(0, 4).join(' · ')}`);
   }
   return { sig, nodes };
 }
@@ -150,7 +156,7 @@ async function main() {
   await sleep(1000);
   reverse();
   relaunch();
-  if (!(await waitForApp(25000))) { console.log('HATA: uygulama açılmadı (ANR/kurulum?)'); writeFileSync(join(runDir, 'graph.json'), JSON.stringify(graph)); return; }
+  if (!(await waitForApp(25000))) { ql('HATA: uygulama açılmadı (ANR/kurulum?)'); writeFileSync(join(runDir, 'graph.json'), JSON.stringify(graph)); return; }
   await sleep(1500);
 
   let cur = await observe();
@@ -185,19 +191,19 @@ async function main() {
     const nxt = await observe();
     if (nxt.sig && nxt.sig !== sig) {
       graph.edges.push({ from: sig, to: nxt.sig, via: el.label });
-      console.log(`  ${sig} --[${el.label}]--> ${nxt.sig}`);
+      ql(`  ${sig} --[${el.label}]--> ${nxt.sig}`);
     }
     const count = Object.keys(graph.nodes).length;
     if (count > prevCount) { prevCount = count; lastNewAt = act; }
-    if (act - lastNewAt >= NO_NEW_LIMIT) { console.log(`(son ${NO_NEW_LIMIT} eylemde yeni ekran yok — duruyorum)`); break; }
+    if (act - lastNewAt >= NO_NEW_LIMIT) { ql(`(son ${NO_NEW_LIMIT} eylemde yeni ekran yok — duruyorum)`); break; }
     cur = nxt.sig ? nxt : cur;
   }
 
   graph.stats.screens = Object.keys(graph.nodes).length;
   graph.stats.edges = graph.edges.length;
   writeFileSync(join(runDir, 'graph.json'), JSON.stringify(graph, null, 2));
-  console.log(`\nkeşif bitti: ${graph.stats.screens} ekran, ${graph.stats.edges} geçiş, ${graph.stats.actions} dokunuş`);
-  console.log(`graph: ${join(runDir, 'graph.json')}`);
+  ql(`\nkeşif bitti: ${graph.stats.screens} ekran, ${graph.stats.edges} geçiş, ${graph.stats.actions} dokunuş`);
+  ql(`graph: ${join(runDir, 'graph.json')}`);
 }
 
 await main();
