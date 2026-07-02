@@ -19,17 +19,39 @@ fix-and-rerun until the requested readiness tier is green.
 **All user-facing output (reports, questions, summaries) is in Turkish.**
 These instructions are internal.
 
-## Operating model — two-speed hybrid
-- **AI (this session)** works SELDOM: authors scenarios once, judges failed or
-  oracle-critical screenshots, diagnoses root causes, writes fixes.
-- **Deterministic layer** works OFTEN: Maestro/Patrol flows + `scripts/*` run
-  fast, free, reproducibly. Scenarios are generated once, persisted under
-  `.qa/scenarios/`, committed, and re-run without AI.
+## Architecture — Measurement Core + thin AI Shell (single pipeline)
+There are NOT two separate products; there is ONE pipeline with two facets that
+share the same deterministic core, findings format, report, and map:
+- **Verifier facet (source available):** derive intent-driven oracle'd scenarios
+  from source, run them deterministically, root-cause + fix. Highest precision.
+- **Explorer facet (APK-only or final acceptance):** autonomously crawl the app
+  (`scripts/explore.mjs`), build the screen-transition map, vision-judge each
+  screen. Answers "give me an APK → full map + UX/UI scan".
+Source is always the **map** (which screens/routes/archetypes exist → targeted,
+non-blind exploration); the running app is the **terrain**.
+
+**The core principle (why this scales & stays cheap):**
+- **Deterministic Measurement Core (no AI, runs in CI):** drives/crawls, captures
+  screenshots + a11y tree + logcat + perf/layout/a11y metrics → emits a compact
+  *measurement bundle* per screen + `graph.json`.
+- **Thin AI Shell (selective, on the BUNDLE not the live app):** plans next
+  action, judges "is this screen/finding a real UX/UI problem" (vision, once per
+  NEW screen — stateless, so context never bloats), infers intent, root-causes,
+  writes fixes, talks to the user. AI is NEVER in the per-tap hot loop.
+- Sub-agents fan out over discovered screens (one vision-judge per screen) — the
+  results feed back so the orchestrator makes precise fixes.
+
+**Blocker → ask user → resume:** when the crawler hits a wall it cannot pass
+autonomously (login/credentials, OTP/captcha, paywall, a destructive action, an
+ambiguous choice), it PAUSES, captures the screen, and asks the user ("this looks
+like login — give test creds, or tap through and say continue"), then resumes.
+Walls become continuations, not failures.
+
 - Token discipline: no "just in case" vision calls; diffs not whole files;
-  oracle questions are yes/no against an expected-outcome sentence, never
-  open-ended "anything weird?".
-- Workhorse = session model (Sonnet recommended). Escalate a single stubborn
-  finding to a stronger model only after 2 failed repair attempts.
+  oracle/vision questions are specific (yes/no against an expected outcome or a
+  concrete issue checklist), never open-ended "anything weird?".
+- Workhorse = session model (Sonnet). Escalate a stubborn finding to a stronger
+  model only after 2 failed repair attempts.
 
 ## Trust rules (non-negotiable — apply before believing any red)
 1. Animations OFF before every run: `scripts/animations.sh off`.
@@ -116,4 +138,12 @@ capturing that flow, warn the user, and mask/exclude it from the report.
 - references/engines.md — framework→engine table, Patrol/Maestro setup,
   fallback driver, adb toggle cheatsheet
 - scripts/ — doctor, new-run, animations, reset-app, screenshot, logcat-scan,
-  monkey (all Bash)
+  monkey (Bash); run-suite.sh (Verifier koşucu); report.mjs (rapor üreteci);
+  explore.mjs (Explorer crawler — AI'sız keşif → graph.json)
+
+## Bilinen sınır (saha dersi)
+`uiautomator dump` Flutter'ın debug semantics ağacında YAVAŞTIR (ekran başına
+saniyeler) → saf crawler büyük uygulamada ağırlaşır. Optimizasyon yönü: durum
+imzasını her adımda tam ağaç yerine ekran görüntüsü + hafif sinyalle çıkarmak,
+tam ağaç dökümünü yalnız YENİ ekranda almak. Vision-hakem paneli bu darboğazdan
+bağımsız çalışır (ekran görüntüleri üzerinden).

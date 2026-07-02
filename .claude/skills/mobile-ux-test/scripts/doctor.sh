@@ -23,6 +23,13 @@ if [ -n "$ADB" ]; then
   fi
 fi
 
+free_gb=$(df -BG /c 2>/dev/null | awk 'NR==2 {gsub("G","",$4); print $4}')
+if [ -n "$free_gb" ] && [ "$free_gb" -lt 8 ]; then
+  fail "disk: ${free_gb}GB boş" "en az 8GB önerilir — emülatör boot etmeyebilir (TEMP maestro*, flutter clean, gradle cache)"
+else
+  pass "disk: ${free_gb:-?}GB boş"
+fi
+
 command -v flutter >/dev/null 2>&1 && pass "flutter" || fail "flutter" "Flutter SDK PATH'te değil"
 command -v java    >/dev/null 2>&1 && pass "java"    || fail "java" "JDK 17+ gerekli (Maestro için)"
 

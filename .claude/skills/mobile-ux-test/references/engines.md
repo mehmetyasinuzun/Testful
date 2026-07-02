@@ -46,6 +46,14 @@ context7 ile doğrula (Patrol: leancode.co docs, Maestro: maestro.dev).
   kez tekrarla. (4) Emülatör/sunucu gibi uzun ömürlü süreçler oturumla birlikte
   ölebilir — koşu başında cihaz + backend sağlığını doğrula, gerekirse snapshot'tan
   geri getir (snapshot uygulama KURULUMUNDAN öncesiyse APK'yı yeniden kur).
+- **Backend köprüsü — `10.0.2.2` > `adb reverse` (saha dersi):** Uygulama yerel
+  bir backend'e bağlanıyorsa, `adb reverse` uzun akışlarda Maestro'nun adb
+  reset'leriyle DÜŞER → geç adımdaki network çağrıları (örn. sonuç ekranı)
+  sessizce boş döner, erken çağrılar (login/liste) geçtiği için hata yanıltıcı
+  olur. Kalıcı çözüm: uygulamayı emülatörün **host-loopback alias'ı `10.0.2.2`**'ye
+  yönlendir (reverse'e hiç gerek kalmaz). En temizi uygulamada host'u yapılandırılabilir
+  yapmak: `const String.fromEnvironment('API_HOST')` + `flutter build ... --dart-define=API_HOST=10.0.2.2`.
+  Bu hem testi sağlamlaştırır hem gerçek bir esneklik (ENV bulgusu).
 
 ## Fallback sürücü (Maestro yok ya da ağaç boş)
 1. `adb exec-out uiautomator dump /dev/tty` → XML ağacı al, `bounds` parse

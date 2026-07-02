@@ -49,5 +49,8 @@ for flow in $(find .qa/scenarios -name '*.flow.yaml' ! -name '_*' | sort); do
   fi
 done
 
+# Kalıcı bulgu tohumu varsa (kaos/testability/performans) rapora ekle
+[ -f "$APP_DIR/.qa/findings.seed.json" ] && cp "$APP_DIR/.qa/findings.seed.json" "$RUN/findings.extra.json"
+
 node "$HERE/report.mjs" "$RUN" "$APP_DIR"
 echo "rapor: $RUN/report.md"
