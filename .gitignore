@@ -1,0 +1,5 @@
+.qa/results/
+*.local.yaml
+node_modules/
+*.log
+targets/

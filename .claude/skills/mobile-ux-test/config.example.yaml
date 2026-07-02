@@ -1,0 +1,15 @@
+# Bunu hedef uygulamanın kökünde `.qa/config.local.yaml` olarak kopyala.
+# .qa/config.local.yaml gitignore'ludur — gerçek kimlik bilgileri commit'lenmez.
+
+test_account:
+  email: "email@example.com"
+  password: "password"
+
+# Uygulama bir yerel backend'e bağlıysa:
+backend:
+  reverse_port: 8080          # adb reverse tcp:8080 tcp:8080
+  start_cmd: ""               # örn. "dart run bin/compass_server.dart" (server dizininde)
+
+emulator:
+  avd: "testful"
+  snapshot: "temiz"
