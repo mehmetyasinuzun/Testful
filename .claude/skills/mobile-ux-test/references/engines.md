@@ -33,6 +33,11 @@ context7 ile doğrula (Patrol: leancode.co docs, Maestro: maestro.dev).
 - Flutter'da element görünürlüğü Semantics ağacından gelir. Element
   bulunamıyorsa kalıcı çözüm kaynağa `Semantics`/`Key` ekletmektir
   (testability patch) — koordinat hack'i son çare.
+- **NavigationBar sekme tuzağı (saha dersi):** Flutter alt-sekme düğümüne konum
+  ekler: `"Kelimeler\nSekme 2 / 5"` — sekme dokunuşları HER ZAMAN
+  `tapOn: 'Etiket[\s\S]*'`. Büyük APK dersi: Maestro `launchApp` (clearState)
+  ağır debug uygulamalarda dadb timeout'una düşer — `TESTFUL_PRELAUNCH=1` ile
+  launch'ı adb'ye ver (run-suite.sh), flow'lar launchApp'sız "bağlan ve sür" olur.
 - **Birleşik semantics tuzağı (saha dersi):** Flutter, kart benzeri widget'larda
   başlık+alt metni TEK düğümde birleştirir (`"Alaska, North America\n20 Jul - 15 Aug"`).
   Maestro tam-eşleşme yaptığından alt-metin seçicisi tutmaz — `[\s\S]*` sonekiyle yaz:
