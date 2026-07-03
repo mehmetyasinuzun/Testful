@@ -1,0 +1,10 @@
+appId: com.example.compass_app
+---
+- clearState
+- launchApp:
+    stopApp: false
+- extendedWaitUntil:
+    visible: "email@example.com"
+    timeout: 15000
+- takeScreenshot: CORE-01-1-cfb842a8bf
+- assertVisible: "email@example.com"

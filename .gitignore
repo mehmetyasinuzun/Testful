@@ -1,4 +1,7 @@
 .qa/results/
+.qa/observe/
+.qa/map/
+.qa/logs/
 *.local.yaml
 node_modules/
 *.log

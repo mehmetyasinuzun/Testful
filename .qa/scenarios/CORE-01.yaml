@@ -1,0 +1,12 @@
+id: CORE-01
+title: email@example.com ekranı kontrolü (cfb842a8bf)
+archetype: universal
+tier: core
+engine: maestro
+package: com.example.compass_app
+preconditions:
+  - reset-app
+steps:
+  - do: launch
+    expect: "uygulama çökmeden açılır ve email@example.com görünür"
+    shot: true
