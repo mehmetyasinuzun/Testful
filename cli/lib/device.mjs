@@ -33,3 +33,18 @@ export function dumpTree() {
 }
 
 export const screenshot = () => adb('exec-out', 'screencap', '-p');
+export const tap = (x, y) => adb('shell', 'input', 'tap', String(x), String(y));
+export const typeText = (s) => adb('shell', 'input', 'text', s.replace(/ /g, '%s'));
+export const back = () => adb('shell', 'input', 'keyevent', 'KEYCODE_BACK');
+export const hideKb = () => adb('shell', 'input', 'keyevent', '111');
+export const sleepOnDevice = (sec) => adb('shell', 'sleep', String(sec));
+
+export function launch(pkg, { clear = false } = {}) {
+  adb('shell', 'am', 'force-stop', pkg);
+  if (clear) adb('shell', 'pm', 'clear', pkg);
+  try {
+    const act = adbStr('shell', 'cmd', 'package', 'resolve-activity', '--brief', pkg).trim().split('\n').pop().trim();
+    if (act.includes('/')) { adb('shell', 'am', 'start', '-n', act); return; }
+  } catch {}
+  adb('shell', 'monkey', '-p', pkg, '-c', 'android.intent.category.LAUNCHER', '1');
+}

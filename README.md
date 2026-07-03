@@ -63,6 +63,14 @@ APK (± kaynak kod)
 
 ## Hızlı Başlangıç
 
+### Tek komutla devreye al
+```bash
+git clone https://github.com/mehmetyasinuzun/Testful.git && cd Testful && node cli/testful.mjs doctor
+```
+`doctor` neyin hazır neyin eksik olduğunu söyler. Eksik AVD'yi yerelden kurmak
+için (indirmesiz): `node cli/testful.mjs setup`. CLI'yi global yapmak için:
+`npm link` → artık her yerde `testful ...`.
+
 ### A) Claude Code ile (önerilen — tam deneyim)
 ```bash
 git clone https://github.com/mehmetyasinuzun/Testful.git
