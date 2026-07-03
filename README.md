@@ -83,6 +83,10 @@ cp -r .claude/skills/mobile-ux-test  <senin-projen>/.claude/skills/
 Senaryolar bir kez yazıldıktan sonra (elle ya da bir AI oturumunda ürettirip
 commit'leyerek) her şey terminalden, sıfır token'la koşar:
 ```bash
+node cli/testful.mjs observe --pkg <paket>     # ekran paketi: ağaç+png+selectors.json
+                                               # (seçiciler GERÇEK ağaçtan: sekme→regex,
+                                               #  etiketsiz alan→koordinat+a11y bulgusu)
+node cli/testful.mjs run <app_dir> "CORE-*"    # suite (bash çekirdeğine delege)
 S=.claude/skills/mobile-ux-test/scripts
 bash $S/doctor.sh                              # ortam sağlık kontrolü
 bash $S/run-suite.sh <app_dir> "CORE-*"        # senaryo paketi + retry + rapor

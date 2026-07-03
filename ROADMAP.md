@@ -39,12 +39,24 @@ duyulan güven (düşük yanlış-alarm + tekrarlanabilirlik).
 - Açık: ENV-02 (adb reverse köprü gecikmesi BOOK akışlarında timeout —
   kalıcı çözüm Faz 2 adb-direct sürüş)
 
-## Faz 2 — Motor: `testful` CLI (TypeScript) ⬜ SIRADAKİ
-- [ ] `testful run|doctor|report` tek komut; bash çekirdeğini absorbe eder
-- [ ] Maestro'suz sürüş opsiyonu (adb-direct; ENV-02'yi kökten çözer)
-- [ ] Durum matrisi otomasyonu: karanlık mod · font 1.3× · döndürme · offline
-- [ ] Uygulama haritası v1: graph.json → report.md'de mermaid (kapsama boyalı)
-- [ ] Motorun kendi test paketi + 10× koşu flakiness ölçümü
+## Faz 2 — Motor: `testful` CLI 🔄 BAŞLADI (olgunluk-kapılı, modül modül)
+Tasarım yasası (SpeakSmith saha dersi): **seçiciler kaynaktan tahmin edilmez —
+observe-first**: her ekranın GERÇEK a11y ağacından çıkarılır; kaynak akışı
+öngörür, ağaç seçiciyi verir. Kapı geçilmeden sonraki modüle GEÇİLMEZ.
+- [x] v0.1 `observe` (2026-07-03): ekran paketi — ağaç+png+selectors.json;
+      sekme/birleşik düğüm → otomatik `[\s\S]*`, etiketsiz alan → koordinat +
+      a11y-eksik bayrağı. SpeakSmith'te canlı doğrulandı (dashboard + form).
+- [x] v0.1 façade: `testful run|doctor` kanıtlı bash çekirdeğine delege;
+      `TESTFUL_PRELAUNCH=1` (adb-launch — büyük APK dadb timeout çözümü)
+- [ ] **KAPI-1:** observe 2. uygulamada (compass_app) doğrulanacak
+- [ ] v0.2 `map`: observe + otonom gezinme → graph.json + kapsama metriği
+      ("etkileşimlerin %X'i denendi") — explore.mjs'i absorbe eder
+- [ ] v0.3 `author`: selectors.json + kaynak haritası → senaryo iskeleti
+      (AI'ya hazır paket; Sonnet rutini için biçilmiş görev)
+- [ ] **KAPI-2:** 2 uygulama × 10 koşu flakiness ölçümü
+- [ ] v0.4 run portu: Maestro'suz adb-direct sürüş + env-fail ≠ senaryo-fail
+      ayrımı + koşu-başı otomatik sağlık kontrolü
+- [ ] Durum matrisi otomasyonu: karanlık · font 1.3× · döndürme · offline
 
 ## Faz 3 — Ürünleşme ⬜
 - [ ] **Çoklu AI sağlayıcı:** `testful judge --provider deepseek|openai|anthropic`

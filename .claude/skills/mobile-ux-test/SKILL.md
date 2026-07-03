@@ -71,6 +71,12 @@ Walls become continuations, not failures.
    redirection corrupts binary stdout (screenshots).
 7. Evidence hierarchy when judging red: logcat signature > deterministic
    assert > vision interpretation.
+8. **Ground-truth-first selectors (SpeakSmith field lesson):** NEVER author
+   selectors from source-code guesses. For every screen a flow touches, run
+   `node cli/testful.mjs observe --pkg <pkg>` FIRST and take selectors from
+   the emitted selectors.json (runtime a11y tree: tabs auto-get `[\s\S]*`,
+   merged nodes handled, unlabeled fields get tap coordinates + an a11y
+   finding). Source predicts the FLOW; the tree provides the SELECTORS.
 
 ## Pipeline (cheap → expensive; stop early on crash-level findings)
 0. **DOCTOR** — `scripts/doctor.sh`. Toolchain, device, Maestro availability.
