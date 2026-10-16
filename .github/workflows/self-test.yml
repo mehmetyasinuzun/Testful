@@ -55,10 +55,20 @@ jobs:
           const r = JSON.parse(fs.readFileSync(`${process.env.OUT}/run/report.json`, 'utf8'));
           const fail = (m) => { console.error(`::error::${m}`); process.exitCode = 1; };
           if (g.stats.screens < 3) fail(`keşif en az 3 ekran bulmalı, bulunan: ${g.stats.screens}`);
-          const labels = Object.values(g.nodes).flatMap((n) => n.interactives.map((e) => e.label));
-          if (!labels.includes('Profil')) fail('ana ekrandaki "Profil" butonu haritada yok');
+          // demo 4 ekran (+ form durumları); fazlası metin alanı içeriğinin ekran sayıldığı anlamına gelir
+          if (g.stats.screens > 8) fail(`ekran sayısı şişti (${g.stats.screens}) — ekran kimliği yazılan metne bağlı olmamalı`);
+          // Android butonları büyük harfle gösterebilir (PROFIL)
+          const labels = Object.values(g.nodes).flatMap((n) => n.interactives.map((e) => (e.label || '').toLowerCase()));
+          if (!labels.includes('profil')) fail('ana ekrandaki "Profil" butonu haritada yok');
+          const shots = fs.existsSync(`${process.env.OUT}/run/screenshots`) ? fs.readdirSync(`${process.env.OUT}/run/screenshots`) : [];
+          if (!shots.some((f) => f.startsWith('DEMO-01'))) fail(`senaryo ekran görüntüleri toplanmadı: ${shots}`);
+          const vids = fs.existsSync(`${process.env.OUT}/video`) ? fs.readdirSync(`${process.env.OUT}/video`) : [];
+          for (const v of ['1-kesif.mp4', '2-senaryolar.mp4', '3-kaos.mp4']) {
+            const p = `${process.env.OUT}/video/${v}`;
+            if (!vids.includes(v) || fs.statSync(p).size < 10000) fail(`video eksik/boş: ${v} (bulunan: ${vids})`);
+          }
           if (!Object.values(g.nodes).some((n) => n.interactives.some((e) => e.a11y_missing))) fail('etiketsiz ikon buton a11y bulgusu olarak yakalanmadı');
           if (g.edges.some((e) => /Hesab. sil/.test(e.via))) fail('keşif riskli "Hesabı sil" butonuna dokundu');
           if (r.totals.passed !== 2) fail(`DEMO-01/02 geçmeli, sonuç: ${JSON.stringify(r.totals)}`);
-          console.log('demo beklentileri tamam:', g.stats, r.totals);
+          console.log('demo beklentileri:', g.stats, r.totals, shots, vids);
           JS

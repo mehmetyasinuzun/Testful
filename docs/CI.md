@@ -42,7 +42,8 @@ yansır (hepsi `@main`'i çağırır) — repo başına bakım yok.
 | Senaryolar | `.qa/scenarios/*.flow.yaml` varsa Maestro ile koşar (3× tekrar + flaky karantina) |
 | Kaos | Sabit seed'li monkey (varsayılan 1000 olay) |
 | Analiz | Yalnız uygulamana ait çökme/ANR/native crash/flutter hatası · etiketsiz (a11y) öğeler |
-| Rapor | İş özeti + PR'da tek güncellenen yorum + `testful-report` artifact'ı |
+| Video | Her aşama ayrı mp4: `1-kesif`, `2-senaryolar`, `3-kaos` (yarı çözünürlük) |
+| Rapor | İş özeti + PR'da tek güncellenen yorum + `testful-report` ve `testful-report-video` artifact'ları |
 
 Artifact içeriği: `map/graph.json`, `map/screens/*.png`, `run/report.md`,
 `run/screenshots/`, `logcat.txt`, `monkey-logcat.txt`, `final.png`, `summary.md`.
@@ -70,6 +71,7 @@ Flaky senaryolar (ilk koşu kaldı, tekrarda geçti) kırmızı yapmaz, raporda 
 | `matrix` | — | `dark,large-font,landscape,offline` |
 | `fail-on` | `scenario` | Yukarıya bak |
 | `pr-comment` | `true` | PR'a özet yorumu |
+| `record-video` | `true` | Emülatör ekran videosu (ayrı artifact) |
 | `timeout-minutes` | `60` | İş zaman aşımı |
 
 Örnek:
@@ -93,6 +95,7 @@ Workflow yerine adım olarak da kullanılabilir (kendi job'ın içinde):
 2. GitHub mobil uygulaması → repo → **Actions** → "Testful" koşusu → iş özeti.
 3. PR açtıysan sonuç PR'da yorum olarak görünür; her push'ta aynı yorum güncellenir.
 4. Ekran görüntüleri: koşu sayfası → **Artifacts** → `testful-report`.
+   Video: `testful-report-video` → zip'i aç → mp4'leri oynat (testin birebir kaydı).
 5. Elle yeniden koşmak: Actions → Testful → **Run workflow**.
 
 ## Maliyet ve sınırlar

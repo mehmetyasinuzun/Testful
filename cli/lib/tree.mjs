@@ -26,7 +26,9 @@ const normDigits = (s) => s.replace(/\d/g, '#').slice(0, 40);
 
 export function screenSignature(nodes, pkg) {
   const own = pkg ? nodes.filter((n) => n.pkg === pkg) : nodes;
-  const feats = own.map((n) => normDigits(n.desc || n.text)).filter(Boolean).sort();
+  // Metin alanının içeriği ekranın kimliği değildir: yazılan her harf yeni "ekran" üretmesin.
+  const feats = own.filter((n) => !n.cls.endsWith('EditText'))
+    .map((n) => normDigits(n.desc || n.text)).filter(Boolean).sort();
   const clickables = own.filter((n) => n.clickable).length;
   return createHash('sha1').update(feats.join('|') + '::' + clickables).digest('hex').slice(0, 10);
 }

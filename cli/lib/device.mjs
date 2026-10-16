@@ -39,6 +39,8 @@ export function dumpTree() {
 export const screenshot = () => adb('exec-out', 'screencap', '-p');
 export const tap = (x, y) => adb('shell', 'input', 'tap', String(x), String(y));
 export const typeText = (s) => adb('shell', 'input', 'text', s.replace(/ /g, '%s'));
+// Alanı temizle: sona git + 40× DEL (tek input çağrısında, hızlı)
+export const clearField = () => adb('shell', 'input', 'keyevent', 'KEYCODE_MOVE_END', ...Array(40).fill('67'));
 export const back = () => adb('shell', 'input', 'keyevent', 'KEYCODE_BACK');
 export const hideKb = () => adb('shell', 'input', 'keyevent', '111');
 export const sleepOnDevice = (sec) => adb('shell', 'sleep', String(sec));

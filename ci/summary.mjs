@@ -3,7 +3,7 @@
 // verdict çıktısı. fail-on politikasına göre çıkış kodu verir.
 //
 // env: OUT PKG FAIL_ON(scenario|crash|never) MONKEY_EVENTS ARTIFACT_NAME
-import { readFileSync, writeFileSync, existsSync, appendFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, appendFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
 const OUT = process.env.OUT || 'testful-out';
@@ -106,6 +106,12 @@ if (steps.monkey && steps.monkey !== 'skipped') {
 }
 L.push(`| Çökme / ANR | ${hardCrashes.length ? `⚠️ ${hardCrashes.length}` : '✅ yok'} |`);
 L.push(`| Erişilebilirlik | ${a11y.length ? `⚠️ ${a11y.length} etiketsiz öğe` : '✅ etiketsiz öğe yok'} |`);
+const videoDir = join(OUT, 'video');
+const videos = existsSync(videoDir) ? readdirSync(videoDir).filter((f) => f.endsWith('.mp4')).sort() : [];
+if (videos.length) {
+  const mb = (f) => (statSync(join(videoDir, f)).size / 1048576).toFixed(1);
+  L.push(`| Ekran videosu | 🎬 ${videos.map((f) => `${f} (${mb(f)} MB)`).join(' · ')} |`);
+}
 L.push('');
 
 if (report?.scenarios?.length) {
@@ -141,6 +147,7 @@ if (a11y.length) {
 }
 
 L.push(`📦 Ekran görüntüleri, logcat, \`graph.json\` ve \`report.md\`: **${ARTIFACT}** artifact'ında${runUrl ? ` ([koşu sayfası](${runUrl}) → Artifacts)` : ''}.`);
+if (videos.length) L.push('', `🎬 Videolar ayrı artifact'ta: **${ARTIFACT}-video** (zip'i aç → mp4'leri telefonda oynat).`);
 
 const md = L.join('\n') + '\n';
 writeFileSync(join(OUT, 'summary.md'), md);

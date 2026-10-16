@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { dumpTree, screenshot, tap, typeText, back, hideKb, launch, requireDevice, sleepOnDevice } from './device.mjs';
+import { dumpTree, screenshot, tap, typeText, clearField, back, hideKb, launch, requireDevice, sleepOnDevice } from './device.mjs';
 import { parseNodes, interactives, screenSignature } from './tree.mjs';
 import { qlog } from './log.mjs';
 
@@ -78,6 +78,7 @@ export async function map({ pkg, out, maxActions = 80, clear = true }) {
       if (field) {
         tap(field.center.x, field.center.y);
         await sleep(600);
+        clearField(); // aynı alana tekrar tekrar eklenip "TestTestTest…" sahte ekranları üretmesin
         typeText('Test');
         hideKb();
         graph.stats.typed++;

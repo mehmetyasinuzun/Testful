@@ -22,6 +22,7 @@ on:
       matrix:            { type: string, default: '' }
       fail-on:           { type: string, default: scenario }
       pr-comment:        { type: boolean, default: true }
+      record-video:      { type: boolean, default: true }
       java-version:      { type: string, default: '17' }
       timeout-minutes:   { type: number, default: 60 }
     outputs:
@@ -52,4 +53,5 @@ jobs:
           matrix: ${{ inputs.matrix }}
           fail-on: ${{ inputs.fail-on }}
           pr-comment: ${{ inputs.pr-comment }}
+          record-video: ${{ inputs.record-video }}
           java-version: ${{ inputs.java-version }}
