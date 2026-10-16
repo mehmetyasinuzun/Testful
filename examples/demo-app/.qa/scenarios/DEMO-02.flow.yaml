@@ -1,0 +1,16 @@
+appId: dev.testful.demo
+---
+- clearState
+# clearState uygulamayı zaten durdurur; launchApp'in ek force-stop'u yeni
+# başlatılan süreci öldürebiliyor (logcat: "Killing … remove task" 50 ms sonra)
+- launchApp:
+    stopApp: false
+- runFlow: _login.flow.yaml
+- tapOn: "Profil"
+- assertVisible: "Kaydet"
+- tapOn: "Adın"
+- inputText: "Ayse"
+- hideKeyboard
+- tapOn: "Kaydet"
+- assertVisible: "Merhaba, Ayse"
+- takeScreenshot: DEMO-02-1

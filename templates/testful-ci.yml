@@ -1,0 +1,38 @@
+# Testful — her push/PR'da gerçek Android emülatöründe otomatik UX testi.
+# Proje türü (Flutter / React Native / Expo / native Gradle) otomatik algılanır.
+# Sonuç: Actions iş özeti + PR yorumu + artifact'lar (rapor, video, APK).
+# Ayrıntı: https://github.com/mehmetyasinuzun/Testful/blob/main/docs/CI.md
+name: Testful
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  # id-token: write   # yalnız Firebase Test Lab'ı anahtarsız (WIF) kullanacaksan
+
+concurrency:
+  group: testful-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  testful:
+    uses: mehmetyasinuzun/Testful/.github/workflows/testful.yml@main
+    # Repo Secrets'ı (varsa) aktarır: MAESTRO_EMAIL / _PASSWORD / _OTP / _PHONE,
+    # SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY, ANTHROPIC_API_KEY, GCP_CREDENTIALS_JSON.
+    # Hiçbiri zorunlu değil; olmayan özellik sessizce atlanır.
+    secrets: inherit
+    # İhtiyaç olursa aç:
+    # with:
+    #   working-directory: mobile          # uygulama alt klasördeyse
+    #   apk-path: build/app-debug.apk      # hazır APK varsa (derleme atlanır)
+    #   build-command: ./scripts/build.sh  # özel derleme
+    #   package: com.sirket.uygulama       # boşsa APK'dan okunur
+    #   fail-on: crash                     # çökme/ANR'de de kırmızı ol
+    #   matrix: dark,large-font            # ek durumlar
+    #   visual-judge: 'false'              # ANTHROPIC_API_KEY olsa bile görsel hakemi kapat
+    #   firebase-test-lab: true            # + Google cihazlarında Robo testi (GCP_CREDENTIALS_JSON)

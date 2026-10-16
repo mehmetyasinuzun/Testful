@@ -1,0 +1,17 @@
+# Paylaşılan giriş alt akışı. Kimlik bilgisi dosyada DEĞİL: yerelde .qa/env.local,
+# CI'da Secrets'tan MAESTRO_EMAIL / MAESTRO_PASSWORD olarak gelir (Maestro MAESTRO_
+# önekli değişkenleri akışa verir; testful log ve artifact'larda şifreyi maskeler).
+appId: dev.testful.demo
+---
+- extendedWaitUntil:
+    visible: "Hoş geldin"
+    timeout: 30000
+- tapOn: "E-posta"
+- inputText: ${MAESTRO_EMAIL}
+- tapOn: "Şifre"
+- inputText: ${MAESTRO_PASSWORD}
+- hideKeyboard
+- tapOn: "Giriş"
+- extendedWaitUntil:
+    visible: "Testful Demo"
+    timeout: 15000

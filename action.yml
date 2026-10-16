@@ -1,0 +1,292 @@
+name: Testful — mobil UX testi
+description: APK'yı derler, gerçek Android emülatöründe otonom keşif + senaryo + kaos testi koşar, raporu özet/PR yorumu/artifact olarak yayınlar.
+author: Mehmet Yasin UZUN
+branding:
+  icon: compass
+  color: purple
+
+inputs:
+  working-directory:
+    description: Hedef uygulamanın kök klasörü (monorepo ise alt klasör).
+    default: .
+  apk-path:
+    description: Hazır APK yolu (working-directory'ye göre). Verilirse derleme atlanır.
+    default: ''
+  build-command:
+    description: Özel derleme komutu (otomatik algılama yerine). APK'yı en yeni *.apk olarak bulur.
+    default: ''
+  package:
+    description: Uygulama paket adı. Boşsa APK'dan okunur.
+    default: ''
+  api-level:
+    description: Emülatör Android API seviyesi.
+    default: '34'
+  target:
+    description: Emülatör sistem imajı hedefi (google_apis, default, ...).
+    default: google_apis
+  max-actions:
+    description: Otonom keşifte en çok dokunuş sayısı.
+    default: '60'
+  max-minutes:
+    description: Otonom keşif için süre sınırı (dakika).
+    default: '8'
+  monkey-events:
+    description: Kaos testi olay sayısı (0 = kapalı).
+    default: '1000'
+  scenarios:
+    description: Koşulacak senaryo ID kalıbı (.qa/scenarios altında, örn. "CORE-*").
+    default: '*'
+  matrix:
+    description: Ek durumlar, virgülle (dark,large-font,landscape,offline).
+    default: ''
+  fail-on:
+    description: "Ne zaman kırmızı olsun: scenario (kurulum/açılış/senaryo hatası) · crash (+ çökme/ANR) · never"
+    default: scenario
+  pr-comment:
+    description: PR'da özet yorumu yaz/güncelle.
+    default: 'true'
+  record-video:
+    description: Her aşamanın (keşif/senaryolar/kaos) emülatör ekran videosunu kaydet.
+    default: 'true'
+  artifact-name:
+    description: Rapor artifact adı (video "-video", APK "-apk" ekiyle ayrı yüklenir).
+    default: testful-report
+  java-version:
+    description: JDK sürümü (Gradle + Maestro).
+    default: '17'
+  flutter-channel:
+    description: Flutter projelerinde kullanılacak kanal.
+    default: stable
+  github-token:
+    description: PR yorumu için token.
+    default: ${{ github.token }}
+
+  # --- Giriş duvarı (gizli: Secrets'tan ver) ---
+  login-user:
+    description: Test hesabı e-posta/kullanıcı adı. Keşif giriş formunu bununla doldurur; akışlarda ${MAESTRO_EMAIL}.
+    default: ''
+  login-password:
+    description: Test hesabı şifresi (Secrets). Log ve artifact'larda maskelenir.
+    default: ''
+  login-otp:
+    description: Sabit test OTP kodu (örn. Supabase "test phone number" OTP'si).
+    default: ''
+  login-phone:
+    description: Telefonla giriş yapan uygulamalar için test numarası.
+    default: ''
+  supabase-url:
+    description: Verilirse test kullanıcısı Supabase'de koşudan önce oluşturulur/eşitlenir (staging projesi önerilir).
+    default: ''
+  supabase-service-role-key:
+    description: Supabase service_role anahtarı (Secrets). Yalnız CI'da kullanılır, uygulamaya girmez.
+    default: ''
+
+  # --- Görsel hakem (Claude) ---
+  visual-judge:
+    description: "auto (anahtar varsa çalışır) · true · false"
+    default: auto
+  anthropic-api-key:
+    description: Görsel hakem için Anthropic API anahtarı (Secrets).
+    default: ''
+  judge-model:
+    description: Görsel hakem modeli.
+    default: claude-opus-5-5
+  judge-max-screens:
+    description: Görsel hakeme gösterilecek en çok ekran (maliyet sınırı).
+    default: '12'
+
+outputs:
+  verdict:
+    description: pass | fail
+    value: ${{ steps.verdict.outputs.verdict }}
+  report-dir:
+    description: Rapor klasörünün yolu.
+    value: ${{ steps.paths.outputs.out }}
+  apk:
+    description: Derlenen/kullanılan APK yolu.
+    value: ${{ steps.build.outputs.apk }}
+  package:
+    description: Uygulama paket adı.
+    value: ${{ steps.pkg.outputs.pkg }}
+
+runs:
+  using: composite
+  steps:
+    - id: paths
+      shell: bash
+      run: |
+        echo "TESTFUL_HOME=$GITHUB_ACTION_PATH" >> "$GITHUB_ENV"
+        echo "out=$RUNNER_TEMP/testful-out" >> "$GITHUB_OUTPUT"
+        cd "${{ inputs.working-directory }}" && echo "app=$(pwd)" >> "$GITHUB_OUTPUT"
+
+    - id: detect
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        APK_PATH: ${{ inputs.apk-path }}
+        BUILD_COMMAND: ${{ inputs.build-command }}
+      run: bash "$TESTFUL_HOME/ci/detect.sh"
+
+    - name: KVM'i aç (emülatör donanım hızlandırması)
+      shell: bash
+      run: |
+        echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+        sudo udevadm control --reload-rules
+        sudo udevadm trigger --name-match=kvm
+
+    - uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: ${{ inputs.java-version }}
+
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+
+    - if: steps.detect.outputs.kind == 'flutter'
+      uses: subosito/flutter-action@v2
+      with:
+        channel: ${{ inputs.flutter-channel }}
+        cache: true
+
+    - id: build
+      name: APK derle
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        APK_PATH: ${{ inputs.apk-path }}
+        BUILD_COMMAND: ${{ inputs.build-command }}
+        PROJECT_KIND: ${{ steps.detect.outputs.kind }}
+      run: bash "$TESTFUL_HOME/ci/build-apk.sh"
+
+    - id: pkg
+      name: Paket adını bul
+      shell: bash
+      env:
+        PKG: ${{ inputs.package }}
+        APK: ${{ steps.build.outputs.apk }}
+      run: |
+        if [ -z "$PKG" ]; then
+          aapt="$(ls -1d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)aapt"
+          PKG="$("$aapt" dump badging "$APK" | sed -n "s/^package: name='\([^']*\)'.*/\1/p")"
+        fi
+        [ -n "$PKG" ] || { echo "::error::Paket adı bulunamadı — 'package' girdisini ver."; exit 1; }
+        echo "pkg=$PKG" >> "$GITHUB_OUTPUT"
+        echo "Paket: $PKG"
+
+    # APK ayrı artifact: telefona indirip kurulabilir; Firebase Test Lab işi de bunu kullanır.
+    - uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact-name }}-apk
+        path: ${{ steps.build.outputs.apk }}
+        retention-days: 7
+
+    - if: inputs.supabase-url != '' && inputs.supabase-service-role-key != ''
+      name: Supabase test kullanıcısı
+      shell: bash
+      env:
+        SUPABASE_URL: ${{ inputs.supabase-url }}
+        SUPABASE_SERVICE_ROLE_KEY: ${{ inputs.supabase-service-role-key }}
+        MAESTRO_EMAIL: ${{ inputs.login-user }}
+        MAESTRO_PASSWORD: ${{ inputs.login-password }}
+        MAESTRO_PHONE: ${{ inputs.login-phone }}
+      run: node "$TESTFUL_HOME/ci/supabase-test-user.mjs"
+
+    - if: steps.detect.outputs.has_scenarios == 'true'
+      name: Maestro kur
+      shell: bash
+      run: |
+        curl -fsSL "https://get.maestro.mobile.dev" | bash
+        echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+
+    - name: Emülatörde test koş
+      uses: reactivecircus/android-emulator-runner@v2
+      env:
+        APK: ${{ steps.build.outputs.apk }}
+        PKG: ${{ steps.pkg.outputs.pkg }}
+        OUT: ${{ steps.paths.outputs.out }}
+        APP_DIR: ${{ steps.paths.outputs.app }}
+        MAX_ACTIONS: ${{ inputs.max-actions }}
+        MAX_MINUTES: ${{ inputs.max-minutes }}
+        MONKEY_EVENTS: ${{ inputs.monkey-events }}
+        SCENARIOS_GLOB: ${{ inputs.scenarios }}
+        MATRIX: ${{ inputs.matrix }}
+        HAS_SCENARIOS: ${{ steps.detect.outputs.has_scenarios }}
+        RECORD_VIDEO: ${{ inputs.record-video }}
+        MAESTRO_EMAIL: ${{ inputs.login-user }}
+        MAESTRO_PASSWORD: ${{ inputs.login-password }}
+        MAESTRO_OTP: ${{ inputs.login-otp }}
+        MAESTRO_PHONE: ${{ inputs.login-phone }}
+      with:
+        api-level: ${{ inputs.api-level }}
+        target: ${{ inputs.target }}
+        arch: x86_64
+        profile: pixel_6
+        # Runner 4 vCPU: 3'ü emülatöre (video kodlama + uygulama), 1'i Maestro/Node'a
+        cores: 3
+        ram-size: 3072M
+        disable-animations: true
+        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot
+        script: bash "$TESTFUL_HOME/ci/emulator-job.sh"
+
+    - id: judge
+      if: always() && steps.build.outcome == 'success' && (inputs.visual-judge == 'true' || (inputs.visual-judge == 'auto' && inputs.anthropic-api-key != ''))
+      name: Görsel hakem (Claude)
+      shell: bash
+      continue-on-error: true
+      env:
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+        OUT: ${{ steps.paths.outputs.out }}
+        TESTFUL_LOG_DIR: ${{ steps.paths.outputs.out }}/logs
+      run: |
+        npm ci --omit=dev --no-audit --no-fund --prefix "$TESTFUL_HOME" >/dev/null
+        node "$TESTFUL_HOME/cli/testful.mjs" judge --map "$OUT/map" --out "$OUT/judge.json" \
+          --model "${{ inputs.judge-model }}" --max-screens "${{ inputs.judge-max-screens }}"
+
+    - id: verdict
+      if: always() && steps.build.outcome == 'success'
+      name: Özet ve karar
+      shell: bash
+      continue-on-error: true
+      env:
+        OUT: ${{ steps.paths.outputs.out }}
+        PKG: ${{ steps.pkg.outputs.pkg }}
+        FAIL_ON: ${{ inputs.fail-on }}
+        MONKEY_EVENTS: ${{ inputs.monkey-events }}
+        ARTIFACT_NAME: ${{ inputs.artifact-name }}
+      run: node "$TESTFUL_HOME/ci/summary.mjs"
+
+    - if: always() && inputs.pr-comment == 'true' && steps.verdict.outcome != 'skipped'
+      name: PR yorumu
+      shell: bash
+      env:
+        OUT: ${{ steps.paths.outputs.out }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: node "$TESTFUL_HOME/ci/pr-comment.mjs"
+
+    - if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: |
+          ${{ steps.paths.outputs.out }}
+          !${{ steps.paths.outputs.out }}/video
+        if-no-files-found: ignore
+        retention-days: 14
+
+    # Video ayrı artifact: telefondan rapordan bağımsız, tek başına indirilsin.
+    - if: always() && inputs.record-video == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact-name }}-video
+        path: ${{ steps.paths.outputs.out }}/video
+        if-no-files-found: ignore
+        retention-days: 14
+        compression-level: 0
+
+    - if: always() && steps.verdict.outputs.verdict == 'fail'
+      name: Testful sonucu
+      shell: bash
+      run: |
+        echo "::error::Testful kırmızı — ayrıntı iş özetinde ve PR yorumunda."
+        exit 1

@@ -1,0 +1,127 @@
+# Testful'un kendi CI'ı:
+#  - unit: birim + keşif motoru testleri (sahte cihaz) Linux/macOS/Windows'ta
+#  - e2e: demo uygulamada gerçek emülatörde uçtan uca koşu + beklenti doğrulamaları
+name: Testful self-test
+
+on:
+  # main'e push + PR'lar. Dal push'ları ayrıca tetiklemez: PR'ı olan dalda aynı
+  # emülatör testi iki kez (push + pull_request) koşuyordu.
+  push:
+    branches: [main]
+    paths-ignore: ['**.md']
+  pull_request:
+    paths-ignore: ['**.md']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: self-test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: npm }
+      - run: npm ci --no-audit --no-fund
+      - run: npm test
+      - name: Sözdizimi (node + bash)
+        if: runner.os == 'Linux'
+        run: |
+          for f in cli/*.mjs cli/lib/*.mjs ci/*.mjs; do node --check "$f"; done
+          for f in ci/*.sh .claude/skills/mobile-ux-test/scripts/*.sh; do bash -n "$f"; done
+      - name: ci-init şablonu üretir, üzerine yazmayı reddeder
+        shell: bash
+        run: |
+          d="$(mktemp -d)"
+          node cli/testful.mjs ci-init "$d"
+          grep -q 'mehmetyasinuzun/Testful/.github/workflows/testful.yml@main' "$d/.github/workflows/testful.yml"
+          ! node cli/testful.mjs ci-init "$d"
+      - name: CLI cihazsız açılır (help + doctor eksikleri raporlar)
+        shell: bash
+        run: |
+          node cli/testful.mjs > /dev/null
+          node cli/testful.mjs doctor || true
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - id: testful
+        uses: ./
+        with:
+          working-directory: examples/demo-app
+          fail-on: crash
+          max-actions: '80'
+          monkey-events: '500'
+          artifact-name: testful-demo-report
+          # Demo uygulamanın HERKESE AÇIK hesabı (gizli değil). Gerçek projede Secrets'tan ver.
+          login-user: demo@testful.dev
+          login-password: Demo&1234
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          judge-max-screens: '4'
+      - name: Demo beklentilerini doğrula
+        env:
+          OUT: ${{ steps.testful.outputs.report-dir }}
+        run: |
+          node - <<'JS'
+          const fs = require('fs');
+          const OUT = process.env.OUT;
+          const g = JSON.parse(fs.readFileSync(`${OUT}/map/graph.json`, 'utf8'));
+          const r = JSON.parse(fs.readFileSync(`${OUT}/run/report.json`, 'utf8'));
+          const fail = (m) => { console.log(`::error::${m}`); process.exitCode = 1; };
+          const labels = Object.values(g.nodes).flatMap((n) => n.interactives.map((e) => (e.label || '').toLowerCase()));
+
+          // Keşif: giriş duvarını geçti, kaydırdı, şişmedi, riskliye dokunmadı
+          if (g.stats.forms_submitted < 1) fail('giriş formu gönderilmedi');
+          if (!labels.includes('profil')) fail('giriş sonrası ana ekran keşfedilmedi');
+          if (!labels.includes('ürün 25')) fail('kaydırma ile listenin sonu bulunamadı');
+          if (!labels.includes('sepete ekle')) fail('kaydırma sonrası açılan detay ekranı bulunamadı');
+          if (g.stats.screens > 14) fail(`ekran sayısı şişti (${g.stats.screens})`);
+          if (g.edges.some((e) => /hesab. sil/i.test(e.via))) fail('keşif riskli "Hesabı sil" butonuna dokundu');
+          if (!Object.values(g.nodes).some((n) => n.interactives.some((e) => e.a11y_missing))) fail('etiketsiz ikon buton a11y bulgusu olarak yakalanmadı');
+
+          // Senaryolar: kesin hata yok; ortam kaynaklı flaky Testful'un karantinasıyla raporlanır
+          if (r.totals.failed !== 0) fail(`senaryo kaldı: ${JSON.stringify(r.scenarios.map((s) => [s.id, s.result, s.reason]))}`);
+          if (r.totals.env_error) fail(`senaryolarda ortam hatası: ${r.env_error || JSON.stringify(r.totals)}`);
+          if (r.totals.passed + r.totals.flaky !== 2) fail(`DEMO-01/02 koşmalı: ${JSON.stringify(r.totals)}`);
+          if (r.totals.flaky) console.log(`::warning::flaky senaryo: ${JSON.stringify(r.totals)} (karantina — kırmızı değil)`);
+
+          // Kanıt: video, ekran görüntüsü, kesintisiz logcat
+          const shotDir = `${OUT}/run/screenshots/normal`;
+          const shots = fs.existsSync(shotDir) ? fs.readdirSync(shotDir) : [];
+          if (!shots.some((f) => f.startsWith('DEMO-01'))) fail(`senaryo ekran görüntüleri toplanmadı: ${shots}`);
+          const vids = fs.existsSync(`${OUT}/video`) ? fs.readdirSync(`${OUT}/video`) : [];
+          for (const phase of ['1-kesif', '2-senaryolar', '3-kaos']) {
+            // birleşik (1-kesif.mp4) ya da birleştirilemezse parçalar (1-kesif-01.mp4…)
+            const files = vids.filter((v) => v === `${phase}.mp4` || v.startsWith(`${phase}-`));
+            const size = files.reduce((n, v) => n + fs.statSync(`${OUT}/video/${v}`).size, 0);
+            if (size < 10000) fail(`video eksik/boş: ${phase} (bulunan: ${vids})`);
+            if (!files.includes(`${phase}.mp4`) && files.length) console.log(`::warning::${phase} videosu parça parça (birleştirme: video/merge.log)`);
+          }
+          const smoke = JSON.parse(fs.readFileSync(`${OUT}/smoke/report.json`, 'utf8'));
+          if (smoke.kind !== 'smoke' || smoke.metrics['kaos olayı'] !== 500) fail(`smoke koşmadı: ${JSON.stringify(smoke.metrics)}`);
+          if (smoke.status === 'not-ready') fail(`smoke engelleyici bulgu buldu: ${JSON.stringify(smoke.findings.map((f) => f.title))}`);
+          // am start -W her zaman TotalTime vermez; ölçülemeyen soğuk açılış bulgu değil uyarıdır
+          if (smoke.metrics['soğuk açılış (ms)'] == null) console.log('::warning::soğuk açılış süresi bu koşuda ölçülemedi');
+          const logcat = fs.readFileSync(`${OUT}/logcat.txt`, 'utf8');
+          if (!logcat.includes('dev.testful.demo')) fail('kesintisiz logcat uygulama satırı içermiyor');
+
+          // Gizlilik: şifre hiçbir log/artifact metninde açık yazılmamalı
+          const leaks = [];
+          const walk = (d) => { for (const f of fs.readdirSync(d)) { const p = `${d}/${f}`; if (fs.statSync(p).isDirectory()) walk(p); else if (/\.(txt|json|md|log)$/.test(f) && fs.readFileSync(p, 'utf8').includes('Demo&1234')) leaks.push(p); } };
+          walk(OUT);
+          if (leaks.length) fail(`şifre artifact'a sızdı: ${leaks.join(', ')}`);
+
+          console.log('demo beklentileri:', g.stats, r.totals, { shots: shots.length, vids });
+          JS

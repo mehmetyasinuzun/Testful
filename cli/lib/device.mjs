@@ -123,6 +123,7 @@ export function clearField(len = 0) {
   for (let i = 0; i < n; i += 50) shell('input', 'keyevent', ...Array(Math.min(50, n - i)).fill('67'));
 }
 export const back = () => shell('input', 'keyevent', 'KEYCODE_BACK');
+export const swipe = (x1, y1, x2, y2, ms = 350) => shell('input', 'swipe', ...[x1, y1, x2, y2, ms].map((v) => String(Math.round(v))));
 export const hideKb = () => shell('input', 'keyevent', 'KEYCODE_ESCAPE');
 
 export const collapseShade = () => tryShell('cmd', 'statusbar', 'collapse');

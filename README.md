@@ -3,7 +3,8 @@
 **AI ile kod yazanların test yükünü alan Android test çekirdeği.**
 Kodu Claude Code / Cursor ile değiştir → `testful smoke` + `testful run` → net bir
 karar (`hazır / hazır değil / belirsiz`), kanıtlı bulgular ve "sıradaki adımlar".
-Sıfır bağımlılık (saf Node.js), bulut yok, kodun makinenden çıkmaz.
+Çekirdek sıfır bağımlılık (saf Node.js), kodun makinenden çıkmaz. İstersen
+**bilgisayarsız**: GitHub Actions'ta bulut emülatöründe her push/PR'da koşar.
 
 ```
 APK ──► smoke ──► map ──► author --from-map ──► run [--matrix] ──► report.json + report.md
@@ -49,6 +50,23 @@ testful run "NAV-*" --matrix dark,large-font,landscape,offline
 
 Her koşu: `.qa/results/<run-id>/report.md` (insan) + `report.json` (makine) + kanıtlar.
 
+### Bilgisayarsız: GitHub Actions (bulut emülatörü)
+
+Uygulama reposuna tek dosya (`testful ci-init` üretir). Her push/PR'da GitHub'ın KVM'li
+Linux makinesinde gerçek emülatör açılır, APK derlenir (Flutter / React Native / Expo /
+native otomatik), `map` + `run` + `smoke` koşar; sonuç iş özetine ve PR yorumuna düşer,
+aşama başına **ekran videosu** artifact olarak gelir. Telefondan takip edilebilir.
+
+```yaml
+jobs:
+  testful:
+    uses: mehmetyasinuzun/Testful/.github/workflows/testful.yml@main
+    secrets: inherit
+```
+
+İsteğe bağlı: test hesabı (`MAESTRO_EMAIL`/`_PASSWORD` secrets), Supabase test kullanıcısı,
+Claude ile görsel hakem (`ANTHROPIC_API_KEY`), Firebase Test Lab. Ayrıntı: [docs/CI.md](docs/CI.md).
+
 ## AI ajanlarıyla kullanım
 
 Claude Code, `testful init`'in kopyaladığı skill'i (`.claude/skills/mobile-ux-test`)
@@ -80,7 +98,9 @@ yeniden hesaplanır. Şema: [report-format.md](.claude/skills/mobile-ux-test/ref
 | `setup` | AVD'yi yerel sistem imajından oluşturur; Windows'ta Maestro'yu `~/.maestro`'ya kurar (PATH'e dokunmaz) |
 | `smoke` | kur → soğuk açılış süresi → açılış çökmesi → ilk ekran a11y (etiketsiz öğe, < 48dp hedef) → seed'li monkey → logcat imzaları |
 | `observe` | o anki ekran: ağaç + PNG + Maestro seçicileri + a11y sorunları |
-| `map` | otonom keşif: etiketliler önce, riskli butonlar (sil/çıkış/öde…) asla, dolu alanlar ezilmez, takılınca nedenini yazar |
+| `map` | otonom keşif: etiketliler önce, riskli butonlar (sil/çıkış/öde…) asla, dolu alanlar ezilmez; **kaydırır**, **giriş/OTP formunu** `MAESTRO_*` sırlarıyla doldurur, işi kalan ekrana bilinen yoldan (BFS) döner, oturum düşerse yeniden girer; `--max-minutes` süre sınırı; takılınca nedenini yazar |
+| `judge` | haritadaki her benzersiz ekranı Claude ile görsel olarak değerlendirir → `judge.json` (`ANTHROPIC_API_KEY`; öneri niteliğinde) |
+| `ci-init [repo]` | repoya GitHub Actions workflow'u ekler (bulut emülatörü, video, PR yorumu) |
 | `author --from-map` | haritadaki her ekrana en kısa yoldan giden flow + oracle çifti; mevcut dosyaları ezmez |
 | `run` | flow'ları koşar; Maestro çıktısından başarısız adımı, logcat'ten çökmeyi çıkarır; `--matrix` ile karanlık/font/yatay/çevrimdışı |
 | `report` | AI bulgularıyla raporu yeniden üretir |
@@ -94,14 +114,15 @@ Ortam değişkenleri: `ANDROID_SERIAL` (çoklu cihazda seçim), `ANDROID_HOME`, 
 
 Node 18.15+ · Android SDK platform-tools · bir emülatör ya da USB cihaz · Maestro CLI
 (`run` için) + JDK 17+. Flutter/Patrol yalnız Flutter derin modu için. API anahtarı ve
-Docker **gerekmez**. Windows 10/11'de uçtan uca doğrulandı; macOS/Linux için yollar
-platform-bağımsız yazıldı. Ayrıntı: [REQUIREMENTS.md](REQUIREMENTS.md).
+Docker **gerekmez**. Windows 10/11'de yerelde uçtan uca doğrulandı; Linux'ta emülatörlü
+uçtan uca her PR'da CI'da koşar; birim testler Linux/macOS/Windows'ta CI'da yeşil. Ayrıntı: [REQUIREMENTS.md](REQUIREMENTS.md).
 
 ## Geliştirme
 
 ```bash
 npm test        # node:test — cihaz gerektirmeyen tüm katmanlar (ayrıştırma, seçiciler,
-                # logcat imzaları, rapor/diff, author, config, CLI çıkış kodları)
+                # logcat imzaları, rapor/diff, author, config, CLI çıkış kodları) +
+                # keşif motoru sahte uygulama simülatöründe uçtan uca (giriş, kaydırma, gezinme)
 ```
 
 Mimari: `cli/lib/` altında tek sorumluluklu modüller — `device` (adb, geçici bağlantı

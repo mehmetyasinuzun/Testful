@@ -1,0 +1,114 @@
+# Testful — başka repoların TEK SATIRLA çağırdığı yeniden kullanılabilir workflow.
+#
+#   jobs:
+#     testful:
+#       uses: mehmetyasinuzun/Testful/.github/workflows/testful.yml@main
+#       secrets: inherit
+#
+# Hazır çağırıcı dosya: templates/testful-ci.yml  (ya da: node cli/testful.mjs ci-init <repo>)
+# Gizli bilgiler (hepsi isteğe bağlı) çağıran reponun Secrets'ından gelir — bkz. docs/CI.md.
+name: Testful (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      working-directory: { type: string, default: '.' }
+      apk-path:          { type: string, default: '' }
+      build-command:     { type: string, default: '' }
+      package:           { type: string, default: '' }
+      api-level:         { type: string, default: '34' }
+      target:            { type: string, default: google_apis }
+      max-actions:       { type: string, default: '60' }
+      max-minutes:       { type: string, default: '8' }
+      monkey-events:     { type: string, default: '1000' }
+      scenarios:         { type: string, default: '*' }
+      matrix:            { type: string, default: '' }
+      fail-on:           { type: string, default: scenario }
+      pr-comment:        { type: boolean, default: true }
+      record-video:      { type: boolean, default: true }
+      java-version:      { type: string, default: '17' }
+      timeout-minutes:   { type: number, default: 60 }
+      visual-judge:      { type: string, default: auto }
+      judge-model:       { type: string, default: claude-opus-5-5 }
+      judge-max-screens: { type: string, default: '12' }
+      # Firebase Test Lab (isteğe bağlı; 30 Eylül 2027'de kapanıyor)
+      firebase-test-lab:         { type: boolean, default: false }
+      firebase-devices:          { type: string, default: 'model=MediumPhone.arm,version=33' }
+      firebase-project-id:       { type: string, default: '' }
+      workload-identity-provider: { type: string, default: '' }
+      service-account:           { type: string, default: '' }
+    secrets:
+      MAESTRO_EMAIL: { required: false }
+      MAESTRO_PASSWORD: { required: false }
+      MAESTRO_OTP: { required: false }
+      MAESTRO_PHONE: { required: false }
+      SUPABASE_URL: { required: false }
+      SUPABASE_SERVICE_ROLE_KEY: { required: false }
+      ANTHROPIC_API_KEY: { required: false }
+      GCP_CREDENTIALS_JSON: { required: false }
+    outputs:
+      verdict:
+        description: pass | fail
+        value: ${{ jobs.testful.outputs.verdict }}
+
+jobs:
+  testful:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    outputs:
+      verdict: ${{ steps.testful.outputs.verdict }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: testful
+        uses: mehmetyasinuzun/Testful@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          apk-path: ${{ inputs.apk-path }}
+          build-command: ${{ inputs.build-command }}
+          package: ${{ inputs.package }}
+          api-level: ${{ inputs.api-level }}
+          target: ${{ inputs.target }}
+          max-actions: ${{ inputs.max-actions }}
+          max-minutes: ${{ inputs.max-minutes }}
+          monkey-events: ${{ inputs.monkey-events }}
+          scenarios: ${{ inputs.scenarios }}
+          matrix: ${{ inputs.matrix }}
+          fail-on: ${{ inputs.fail-on }}
+          pr-comment: ${{ inputs.pr-comment }}
+          record-video: ${{ inputs.record-video }}
+          java-version: ${{ inputs.java-version }}
+          visual-judge: ${{ inputs.visual-judge }}
+          judge-model: ${{ inputs.judge-model }}
+          judge-max-screens: ${{ inputs.judge-max-screens }}
+          login-user: ${{ secrets.MAESTRO_EMAIL }}
+          login-password: ${{ secrets.MAESTRO_PASSWORD }}
+          login-otp: ${{ secrets.MAESTRO_OTP }}
+          login-phone: ${{ secrets.MAESTRO_PHONE }}
+          supabase-url: ${{ secrets.SUPABASE_URL }}
+          supabase-service-role-key: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+
+  # Gerçek/sanal Google cihazlarında Robo testi; testful işinin derlediği APK'yı kullanır.
+  firebase:
+    if: always() && inputs.firebase-test-lab && needs.testful.result != 'skipped' && needs.testful.result != 'cancelled'
+    needs: testful
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # İzinler çağırandan devralınır. Anahtarsız WIF kullanacaksan çağıran dosyaya
+    # `id-token: write` ekle (burada istemek, vermeyen tüm çağıranları kırardı).
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: testful-report-apk
+          path: apk
+      - id: apk
+        shell: bash
+        run: echo "path=$(find apk -name '*.apk' | head -1)" >> "$GITHUB_OUTPUT"
+      - uses: mehmetyasinuzun/Testful/firebase@main
+        with:
+          apk-path: ${{ steps.apk.outputs.path }}
+          gcp-credentials-json: ${{ secrets.GCP_CREDENTIALS_JSON }}
+          workload-identity-provider: ${{ inputs.workload-identity-provider }}
+          service-account: ${{ inputs.service-account }}
+          project-id: ${{ inputs.firebase-project-id }}
+          devices: ${{ inputs.firebase-devices }}

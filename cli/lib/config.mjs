@@ -21,8 +21,10 @@ export function loadConfig(appDir = '.') {
 
 export function loadSecrets(appDir = '.') {
   const file = join(resolve(appDir), '.qa', 'env.local');
-  if (!existsSync(file)) return {};
-  const env = {};
+  // CI'da sırlar ortamdan gelir (GitHub Secrets → MAESTRO_EMAIL, MAESTRO_PASSWORD…);
+  // yerelde .qa/env.local. İkisi de varsa dosya önceliklidir.
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k, v]) => /^MAESTRO_/.test(k) && !/^MAESTRO_CLI_/.test(k) && v));
+  if (!existsSync(file)) return env;
   for (const [k, v] of Object.entries(parseDotenv(readFileSync(file, 'utf8')))) {
     env[k.startsWith('MAESTRO_') ? k : `MAESTRO_${k}`] = v;
   }

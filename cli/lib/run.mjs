@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync, readdirSync, existsSync, readFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readdirSync, existsSync, readFileSync, copyFileSync, statSync } from 'node:fs';
 import { join, basename, relative } from 'node:path';
 import {
   requireDevice, deviceInfo, stabilize, resetApp, launch, clearLogcat, dumpLogcat, reverse,
@@ -38,6 +38,25 @@ function deviceAlive(serial) {
   try { return listDevices().some((d) => d.serial === serial && d.state === 'device'); } catch { return false; }
 }
 
+/**
+ * Maestro --debug-output ile çalışınca takeScreenshot çıktısını çalışma dizinine değil
+ * debug/<deneme>/<akış>/takeScreenshot/ altına yazar; rapordaki screenshots alanı boş
+ * kalıyordu. Bu PNG'leri durum klasörüne toplar (aynı ad varsa son deneme kazanır).
+ */
+export function collectScreenshots(debugDir, shotsDir) {
+  if (!existsSync(debugDir)) return 0;
+  let n = 0;
+  const walk = (d) => {
+    for (const f of readdirSync(d)) {
+      const p = join(d, f);
+      if (statSync(p).isDirectory()) walk(p);
+      else if (f.endsWith('.png') && basename(d) === 'takeScreenshot') { copyFileSync(p, join(shotsDir, f)); n++; }
+    }
+  };
+  walk(debugDir);
+  return n;
+}
+
 const pngsIn = (dir, prefix = '') => (existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith('.png') && f.startsWith(prefix)) : []);
 
 export async function runSuite({ appDir = '.', glob = '*', matrix = [], apk = null, json = false }) {
@@ -69,6 +88,16 @@ export async function runSuite({ appDir = '.', glob = '*', matrix = [], apk = nu
   const attemptsMax = 1 + Math.max(0, Number(cfg.retries));
 
   const unstabilize = stabilize();
+
+  // Isınma (puanlanmaz): ilk `maestro test` cihaza sürücü uygulamasını kurup başlatır;
+  // bu ilk senaryonun içinde olursa onu boş ekranla düşürebiliyor (references/engines.md).
+  if (pkg) {
+    const warm = join(runDir, 'debug', '_warmup.flow.yaml');
+    mkdirSync(join(runDir, 'debug'), { recursive: true });
+    writeFileSync(warm, `appId: ${pkg}\n---\n- pressKey: Home\n`);
+    qlog('[ISINMA] Maestro sürücüsü hazırlanıyor (puanlanmaz)');
+    await runFlow({ flowPath: warm, cwd: runDir, debugDir: join(runDir, 'debug', '_warmup'), logPath: join(runDir, 'logs', '_warmup.txt'), serial, env: secrets, timeoutSec: 180 });
+  }
   qlog(`[KOŞU] ${runId} · ${ids.length} senaryo × ${1 + matrix.length} durum · cihaz ${serial}`);
 
   const scenarios = [];
@@ -87,6 +116,7 @@ export async function runSuite({ appDir = '.', glob = '*', matrix = [], apk = nu
     const debugDir = join(runDir, 'debug', tag);
     const logPath = join(runDir, 'logs', `${tag}.txt`);
     const res = await runFlow({ flowPath, cwd: shotsDir, debugDir, logPath, serial, env: secrets, timeoutSec: cfg.flowTimeoutSec });
+    collectScreenshots(debugDir, shotsDir);
     const logcat = dumpLogcat();
     const scan = scanLogcat(logcat, { pkg: appId });
     const crash = scan.hits.find((h) => ['crash', 'anr', 'oom'].includes(h.type)) || null;

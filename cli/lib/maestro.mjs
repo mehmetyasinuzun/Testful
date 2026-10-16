@@ -1,5 +1,5 @@
 import { spawn, execFileSync } from 'node:child_process';
-import { existsSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, writeFileSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { which, stripAnsi } from './util.mjs';
@@ -37,6 +37,36 @@ export function classifyOutput(out) {
   return { envError: !!envHit, reason: reasonLine ? reasonLine.slice(0, 300) : null };
 }
 
+/** Maskelenecek sır değerleri: MAESTRO_* içinden şifre/OTP/token/anahtar olanlar. */
+export function secretValues(env = {}) {
+  return Object.entries(env)
+    .filter(([k, v]) => /^MAESTRO_/.test(k) && /PASS|OTP|TOKEN|SECRET|KEY|PIN/i.test(k) && v && String(v).length >= 3)
+    .map(([, v]) => String(v))
+    .sort((a, b) => b.length - a.length);
+}
+
+/** Log/artifact metninden sırları maskeler (Maestro inputText değerini log'a basar). */
+export function redact(text, secrets) {
+  let out = String(text);
+  for (const v of secrets) out = out.split(v).join('***');
+  return out;
+}
+
+/** Maestro --debug-output klasöründeki metin dosyalarını yerinde maskeler. */
+export function redactDir(dir, secrets) {
+  if (!secrets.length || !existsSync(dir)) return;
+  for (const f of readdirSync(dir)) {
+    const p = join(dir, f);
+    try {
+      if (statSync(p).isDirectory()) { redactDir(p, secrets); continue; }
+      if (!/\.(json|log|txt|yaml|html)$/i.test(f)) continue;
+      const t = readFileSync(p, 'utf8');
+      const r = redact(t, secrets);
+      if (r !== t) writeFileSync(p, r);
+    } catch {}
+  }
+}
+
 export function runFlow({ flowPath, cwd, debugDir, logPath, serial, env = {}, timeoutSec = 300 }) {
   const maestro = resolveMaestro();
   mkdirSync(debugDir, { recursive: true });
@@ -68,7 +98,9 @@ export function runFlow({ flowPath, cwd, debugDir, logPath, serial, env = {}, ti
       clearTimeout(timer);
       if (spawnErr) out += `\n[testful] maestro başlatılamadı: ${spawnErr.message}`;
       if (timedOut) out += `\n[testful] zaman aşımı: ${timeoutSec}s`;
-      writeFileSync(logPath, stripAnsi(out));
+      const secrets = secretValues(childEnv);
+      writeFileSync(logPath, redact(stripAnsi(out), secrets));
+      redactDir(debugDir, secrets);
       const cls = classifyOutput(out);
       resolveP({
         ok: code === 0 && !timedOut && !spawnErr,

@@ -13,6 +13,8 @@ BAŞLANGIÇ
   testful init [app_dir] [--no-skill]     .qa/ iskeleti + config + .gitignore + Claude Code skill'i
   testful doctor [--json]                 ortam sağlık kontrolü
   testful setup [--avd testful]           AVD (yerel imajdan) + Maestro kurulumu
+  testful ci-init [repo_dir] [--force]     GitHub Actions workflow'u ekler: her push/PR'da bulut
+                                          emülatöründe test (bilgisayarsız; bkz. docs/CI.md)
 
 TEST
   testful smoke [app_dir] [--pkg P] [--apk F] [--events 1500] [--seed 42] [--json]
@@ -26,8 +28,13 @@ TEST
 KEŞİF ve ÜRETİM
   testful observe [--pkg P] [--out .qa/observe] [--json]
                                           o anki ekran: ağaç + png + gerçek seçiciler + a11y sorunları
-  testful map [--pkg P] [--out .qa/map] [--max 80] [--no-clear]
-                                          otonom keşif → graph.json + map.md (mermaid) + kapsama
+  testful map [--pkg P] [--out .qa/map] [--max 80] [--max-minutes 10] [--no-clear]
+                                          otonom keşif → graph.json + map.md (mermaid) + kapsama;
+                                          kaydırır, giriş/OTP formunu doldurur (MAESTRO_EMAIL/
+                                          _PASSWORD/_OTP/_PHONE), işi kalan ekrana yoldan döner
+  testful judge [--map .qa/map] [--max-screens 12] [--model id] [--effort low|medium|high]
+                                          görsel hakem: haritadaki her benzersiz ekranı Claude ile
+                                          değerlendirir → judge.json (ANTHROPIC_API_KEY gerekir)
   testful author --from-map [.qa/map] [--out .qa/scenarios] [--force]
                                           haritadan her ekrana giden regresyon flow'ları (AI'sız)
   testful author --in .qa/observe [--pkg P] [--out .qa/scenarios] [--force]
@@ -131,9 +138,31 @@ async function main() {
       const cfg = loadConfig('.');
       const pkg = flags.pkg || cfg.package;
       if (!pkg) throw new UsageError('--pkg gerekli (ya da .qa/testful.json içinde "package")');
-      const g = await map({ pkg, out: flags.out || '.qa/map', maxActions: num(flags.max, 80, 'max'), clear: !flags['no-clear'], reversePorts: cfg.reverse, secrets: loadSecrets('.') });
+      const g = await map({ pkg, out: flags.out || '.qa/map', maxActions: num(flags.max, 80, 'max'), maxMinutes: num(flags['max-minutes'], 10, 'max-minutes'), clear: !flags['no-clear'], reversePorts: cfg.reverse, secrets: loadSecrets('.') });
       if (json) emit({ stats: g.stats, crashes: g.crashes, graph: join(flags.out || '.qa/map', 'graph.json') });
       return g.crashes?.some((c) => ['crash', 'anr', 'oom'].includes(c.type)) ? EXIT.NOT_READY : EXIT.OK;
+    }
+    case 'judge': {
+      const { judge, DEFAULT_MODEL } = await import('./lib/judge.mjs');
+      const mapDir = typeof flags.map === 'string' ? flags.map : '.qa/map';
+      const r = await judge({
+        mapDir,
+        out: typeof flags.out === 'string' ? flags.out : join(mapDir, 'judge.json'),
+        model: typeof flags.model === 'string' ? flags.model : DEFAULT_MODEL,
+        effort: typeof flags.effort === 'string' ? flags.effort : 'medium',
+        maxScreens: num(flags['max-screens'], 12, 'max-screens'),
+      });
+      if (json) emit(r);
+      return EXIT.OK;
+    }
+    case 'ci-init': {
+      const { mkdirSync, copyFileSync } = await import('node:fs');
+      const target = join(pos[0] || '.', '.github', 'workflows', 'testful.yml');
+      if (existsSync(target) && !flags.force) throw new UsageError(`zaten var: ${target} (üzerine yazmak için --force)`);
+      mkdirSync(dirname(target), { recursive: true });
+      copyFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'templates', 'testful-ci.yml'), target);
+      console.log(`eklendi: ${target}\ncommit + push et → Actions sekmesinde "Testful" koşusu başlar.`);
+      return EXIT.OK;
     }
     case 'author': {
       const { authorFromMap, authorFromObserve } = await import('./lib/author.mjs');

@@ -8,6 +8,10 @@
   },
   "files": [
     "cli/",
+    "ci/",
+    "templates/",
+    "firebase/",
+    "action.yml",
     ".claude/skills/mobile-ux-test/",
     "README.md",
     "LICENSE"
@@ -20,11 +24,26 @@
   "engines": {
     "node": ">=18.15"
   },
-  "keywords": ["android", "testing", "maestro", "flutter", "react-native", "qa", "ai", "claude-code"],
+  "keywords": [
+    "ai",
+    "android",
+    "ci",
+    "claude-code",
+    "emulator",
+    "flutter",
+    "github-actions",
+    "maestro",
+    "qa",
+    "react-native",
+    "testing"
+  ],
   "license": "MIT",
   "author": "Mehmet Yasin UZUN",
   "repository": {
     "type": "git",
     "url": "https://github.com/mehmetyasinuzun/Testful.git"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.135.0"
   }
 }

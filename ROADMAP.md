@@ -64,16 +64,21 @@ observe-first**: her ekranın GERÇEK a11y ağacından çıkarılır; kaynak ak�
       - status bar demo modu, adb geçici kopma dayanıklılığı, disk ön-kontrolü
       - crawler: etiketli-önce, frontier dönüşü, dolu alan koruması, takılma nedeni, mermaid
       - `init` (iskelet + skill), platform-bağımsız doctor/setup, 24 birim/entegrasyon testi
-- [ ] **KAPI-2:** 2 uygulama × 10 koşu flakiness ölçümü (Kotlin native dahil) ← SIRADAKİ
+- [x] **v0.3 CI** ✅ (2026-10-16): GitHub Actions bulut emülatörü (reusable workflow,
+      aşama başına video, PR yorumu, APK artifact); keşif: kaydırma, giriş/OTP formu,
+      BFS gezinme + yeniden giriş, süre sınırı; `judge` (Claude, JSON şemalı); Supabase
+      test kullanıcısı; Firebase Test Lab (30.09.2027'ye dek); birim testler 3 OS'ta
+- [ ] **KAPI-2:** 2 uygulama × 10 koşu flakiness ölçümü — altyapı hazır:
+      `field-trials.yml` (F-Droid: Fossify Notes, Catima, OpenTracks × N, haftalık)
 - [ ] Patrol koşucusu (`engine: patrol` senaryoları için)
 - [ ] Görsel regresyon akışı: `assertScreenshot` baseline üretimi (`testful baseline`)
 
 ## Faz 3 — Ürünleşme ⬜
-- [ ] **Çoklu AI sağlayıcı:** `testful judge --provider deepseek|openai|anthropic`
+- [~] `testful judge`: Claude ✅ · diğer sağlayıcılar (`--provider deepseek|openai`) ⬜
       (BYOK; sözleşme = ölçüm paketi → JSON hüküm; vision destekli her model)
 - [ ] MCP server: motoru saran ince adaptör (Cursor ve diğer istemciler)
 - [ ] İnteraktif HTML harita (screenshot-düğümlü, tıklanabilir, ısı haritası)
-- [ ] Linux CI: KVM'li Docker emülatör konteyneri
+- [x] Linux CI: GitHub Actions KVM'li emülatör (Docker'a gerek kalmadı) — docs/CI.md
 - [ ] RESILIENCE / PERFORMANCE / STORE tier'larının tam otomasyonu
 
 ## Faz 4 — Yayılım ⬜

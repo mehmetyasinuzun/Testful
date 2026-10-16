@@ -1,0 +1,14 @@
+id: DEMO-01
+title: Giriş yapılır ve ana ekran görünür
+archetype: auth
+tier: core
+engine: maestro
+package: dev.testful.demo
+preconditions:
+  - reset-app
+steps:
+  - do: launch
+    expect: "giriş ekranı ('Hoş geldin') çökmeden açılır"
+  - do: "test hesabıyla giriş yap (MAESTRO_EMAIL / _PASSWORD)"
+    expect: "'Testful Demo' ana ekranı, 'Profil' ve 'Ayarlar' görünür"
+    shot: true
