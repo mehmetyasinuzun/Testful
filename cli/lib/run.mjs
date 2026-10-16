@@ -1,295 +1,189 @@
-import { mkdirSync, writeFileSync, readdirSync, existsSync, readFileSync, copyFileSync } from 'node:fs';
-import { join, basename, resolve } from 'node:path';
-import { spawnSync } from 'node:child_process';
-import { resolveMaestro, spawnArgs } from './platform.mjs';
-import { adb, requireDevice, setAnimations, resetApp, launch, scanLogcat } from './device.mjs';
-import { qlog } from './log.mjs';
-import { applyMatrixState } from './matrix.mjs';
+import { mkdirSync, writeFileSync, readdirSync, existsSync, readFileSync } from 'node:fs';
+import { join, basename, relative } from 'node:path';
+import {
+  requireDevice, deviceInfo, stabilize, resetApp, launch, clearLogcat, dumpLogcat, reverse,
+  isInstalled, installApk, listDevices,
+} from './device.mjs';
+import { qlog, configureLog } from './log.mjs';
+import { preflightDisk } from './doctor.mjs';
+import { applyMatrixState, validateMatrix } from './matrix.mjs';
+import { loadConfig, loadSecrets, detectFramework } from './config.mjs';
+import { resolveMaestro, runFlow } from './maestro.mjs';
+import { scanLogcat } from './logcat.mjs';
+import { finalizeReport, summaryLine } from './report.mjs';
+import { globToRegex, newRunId, sleep } from './util.mjs';
+import { UsageError, EnvError } from './errors.mjs';
 
-function getMaestroCmd() {
-  const m = resolveMaestro();
-  if (!m) throw new Error('Maestro CLI bulunamadı. "testful setup" çalıştırın ya da https://docs.maestro.dev');
-  return m;
+export function readOracle(scenariosDir, id) {
+  const p = join(scenariosDir, `${id}.yaml`);
+  if (!existsSync(p)) return { title: id, tier: '' };
+  const t = readFileSync(p, 'utf8');
+  const field = (k) => (t.match(new RegExp(`^${k}:\\s*(.+)$`, 'm')) || [])[1]?.trim().replace(/^["']|["']$/g, '');
+  return { title: field('title') || id, tier: field('tier') || '' };
 }
 
-/**
- * Akışlara geçirilecek değişkenler: TESTFUL_LOGIN_* ve MAESTRO_* ortam değişkenleri
- * `-e KEY=VALUE` olarak verilir; akışta ${TESTFUL_LOGIN_USER} şeklinde kullanılır.
- * Gizli değerler (şifre) böylece senaryo dosyasına yazılmaz.
- */
-/** Log/artifact'a yazılan metinden gizli değerleri (şifre, OTP, token) maskeler. */
-export function redact(text, env = process.env) {
-  const secrets = Object.keys(env)
-    .filter((k) => /^(TESTFUL_LOGIN_|MAESTRO_)/.test(k) && /PASS|OTP|TOKEN|SECRET|KEY/i.test(k))
-    .map((k) => env[k])
-    .filter((v) => v && v.length >= 3)
-    .sort((a, b) => b.length - a.length);
-  let out = String(text);
-  for (const v of secrets) out = out.split(v).join('***');
-  return out;
+export function listFlows(scenariosDir, glob = '*') {
+  if (!existsSync(scenariosDir)) throw new UsageError(`senaryo klasörü yok: ${scenariosDir} — önce "testful init" ve "testful author" çalıştır`);
+  const re = globToRegex(glob);
+  return readdirSync(scenariosDir)
+    .filter((f) => f.endsWith('.flow.yaml') && !f.startsWith('_'))
+    .map((f) => basename(f, '.flow.yaml'))
+    .filter((id) => re.test(id))
+    .sort();
 }
 
-export function flowEnvArgs(env = process.env) {
-  return Object.keys(env)
-    .filter((k) => /^(TESTFUL_LOGIN_|MAESTRO_)/.test(k) && env[k] !== '')
-    .sort()
-    .flatMap((k) => ['-e', `${k}=${env[k]}`]);
+const flowAppId = (path) => (readFileSync(path, 'utf8').match(/^appId:\s*["']?([\w.]+)["']?\s*$/m) || [])[1] || null;
+
+function deviceAlive(serial) {
+  try { return listDevices().some((d) => d.serial === serial && d.state === 'device'); } catch { return false; }
 }
 
-export async function runSuite({ appDir, glob = '*', matrix = [] }) {
-  appDir = resolve(appDir);
-  requireDevice();
-  const maestro = getMaestroCmd();
-  
-  // Disable animations for stability
-  setAnimations('off');
-  
-  const scenariosDir = join(appDir, '.qa', 'scenarios');
-  if (!existsSync(scenariosDir)) {
-    throw new Error(`Senaryolar klasörü bulunamadı: ${scenariosDir}`);
+const pngsIn = (dir, prefix = '') => (existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith('.png') && f.startsWith(prefix)) : []);
+
+export async function runSuite({ appDir = '.', glob = '*', matrix = [], apk = null, json = false }) {
+  const cfg = loadConfig(appDir);
+  configureLog({ appDir: cfg.appDir, stderr: json });
+  validateMatrix(matrix);
+  const scenariosDir = join(cfg.appDir, '.qa', 'scenarios');
+  const ids = listFlows(scenariosDir, glob);
+  if (!ids.length) throw new UsageError(`"${glob}" ile eşleşen senaryo yok (${scenariosDir})`);
+
+  preflightDisk();
+  const serial = requireDevice();
+  resolveMaestro();
+  const pkg = cfg.package || flowAppId(join(scenariosDir, `${ids[0]}.flow.yaml`));
+  const apkPath = apk || cfg.apk;
+  if (apkPath && (apk || (pkg && !isInstalled(pkg)))) {
+    qlog(`[KURULUM] ${apkPath}`);
+    installApk(apkPath);
   }
-  
-  const files = readdirSync(scenariosDir).filter(f => f.endsWith('.flow.yaml') && !f.startsWith('_'));
-  const regex = new RegExp('^' + glob.replace(/\*/g, '.*') + '$');
-  const matchingFiles = files.filter(f => regex.test(basename(f, '.flow.yaml')));
-  
-  if (matchingFiles.length === 0) {
-    qlog(`[UYARI] Glob ile eşleşen senaryo bulunamadı: ${glob}`);
-    return;
+  if (pkg && !isInstalled(pkg)) throw new EnvError(`${pkg} cihazda kurulu değil — --apk <yol> ver ya da .qa/testful.json içine "apk" ekle`);
+
+  const runId = newRunId();
+  const runDir = join(cfg.appDir, '.qa', 'results', runId);
+  for (const d of ['logs', 'logcat', 'debug', 'screenshots']) mkdirSync(join(runDir, d), { recursive: true });
+  const rel = (p) => relative(runDir, p).replace(/\\/g, '/');
+  const secrets = loadSecrets(cfg.appDir);
+  const prelaunch = cfg.prelaunch || process.env.TESTFUL_PRELAUNCH === '1';
+  const isolate = cfg.isolate !== false;
+  const attemptsMax = 1 + Math.max(0, Number(cfg.retries));
+
+  const unstabilize = stabilize();
+
+  // Isınma (puanlanmaz): ilk `maestro test` cihaza sürücü uygulamasını kurup başlatır;
+  // bu ilk senaryonun içinde olursa onu boş ekranla düşürebiliyor (references/engines.md).
+  if (pkg) {
+    const warm = join(runDir, 'debug', '_warmup.flow.yaml');
+    mkdirSync(join(runDir, 'debug'), { recursive: true });
+    writeFileSync(warm, `appId: ${pkg}\n---\n- pressKey: Home\n`);
+    qlog('[ISINMA] Maestro sürücüsü hazırlanıyor (puanlanmaz)');
+    await runFlow({ flowPath: warm, cwd: runDir, debugDir: join(runDir, 'debug', '_warmup'), logPath: join(runDir, 'logs', '_warmup.txt'), serial, env: secrets, timeoutSec: 180 });
   }
-  
-  // Create Run directory
-  const runId = new Date().toISOString().replace(/T/, '-').replace(/\..+/, '').replace(/:/g, '').replace(/-/g, '');
-  const runDir = join(appDir, '.qa', 'results', runId);
-  const shotsDir = join(runDir, 'screenshots');
-  const logcatDir = join(runDir, 'logcat');
-  mkdirSync(shotsDir, { recursive: true });
-  mkdirSync(logcatDir, { recursive: true });
-  
-  qlog(`[RUN] Koşu başladı: ${runId}`);
-  const resultsFile = join(runDir, 'results.ndjson');
-  
-  const executeFlow = (flowPath, logPath) => {
-    try {
-      const s = spawnArgs(maestro, ['test', ...flowEnvArgs(), flowPath]);
-      const res = spawnSync(s.cmd, s.args, {
-        cwd: shotsDir,
-        stdio: 'pipe',
-        encoding: 'utf8',
-        shell: s.shell,
-      });
-      if (res.error) {
-        writeFileSync(logPath, redact(`Spawning hatası: ${res.error.message}\nCode: ${res.error.code}`));
-        return false;
-      }
-      writeFileSync(logPath, redact((res.stdout || '') + '\n' + (res.stderr || '')));
-      return res.status === 0;
-    } catch (e) {
-      writeFileSync(logPath, redact(`İstisna: ${e.message}`));
-      return false;
+  qlog(`[KOŞU] ${runId} · ${ids.length} senaryo × ${1 + matrix.length} durum · cihaz ${serial}`);
+
+  const scenarios = [];
+  let envAbort = null;
+
+  const attempt = async (id, state, n) => {
+    const flowPath = join(scenariosDir, `${id}.flow.yaml`);
+    const appId = flowAppId(flowPath) || pkg;
+    const tag = `${id}${state ? `@${state}` : ''}-${n}`;
+    if (isolate && appId) resetApp(appId);
+    reverse(cfg.reverse);
+    clearLogcat();
+    if (prelaunch && appId) { launch(appId); await sleep(8000); }
+    const shotsDir = join(runDir, 'screenshots', state || 'normal');
+    mkdirSync(shotsDir, { recursive: true });
+    const debugDir = join(runDir, 'debug', tag);
+    const logPath = join(runDir, 'logs', `${tag}.txt`);
+    const res = await runFlow({ flowPath, cwd: shotsDir, debugDir, logPath, serial, env: secrets, timeoutSec: cfg.flowTimeoutSec });
+    const logcat = dumpLogcat();
+    const scan = scanLogcat(logcat, { pkg: appId });
+    const crash = scan.hits.find((h) => ['crash', 'anr', 'oom'].includes(h.type)) || null;
+    const evidence = [rel(logPath), ...pngsIn(debugDir).map((f) => rel(join(debugDir, f)))];
+    if (!res.ok || !scan.clean) {
+      const lc = join(runDir, 'logcat', `${tag}.txt`);
+      writeFileSync(lc, logcat || '[testful] logcat okunamadı');
+      evidence.push(rel(lc));
     }
+    return { ...res, ok: res.ok && !crash, crash, appHits: scan.hits, evidence };
   };
 
-  const runAllScenarios = async (stateLabel = '') => {
-    const suffix = stateLabel ? `-${stateLabel}` : '';
-    for (const file of matchingFiles) {
-      const id = basename(file, '.flow.yaml');
-      const fullId = id + suffix;
-      const flowPath = join(scenariosDir, file);
-      
-      // Parse app package
-      const flowContent = readFileSync(flowPath, 'utf8');
-      const pkgMatch = flowContent.match(/^appId:\s*(.+)$/m);
-      const pkg = pkgMatch ? pkgMatch[1].trim() : '';
-      
-      qlog(`[SCENARIO] Çalıştırılıyor: ${fullId}`);
-      
-      // Set up adb reverse
-      try { adb('reverse', 'tcp:8080', 'tcp:8080'); } catch {}
-      
-      const prelaunch = () => {
-        if (process.env.TESTFUL_PRELAUNCH === '1' && pkg) {
-          try {
-            adb('shell', 'am', 'force-stop', pkg);
-            adb('shell', 'pm', 'clear', pkg);
-            adb('shell', 'monkey', '-p', pkg, '-c', 'android.intent.category.LAUNCHER', '1');
-            adb('shell', 'sleep', '8');
-          } catch {}
-        }
-      };
-
-      prelaunch();
-      
-      // 1. Run
-      const log1 = join(logcatDir, `${fullId}-1.txt`);
-      const ok1 = executeFlow(flowPath, log1);
-      
-      if (ok1) {
-        qlog(`[PASS] ${fullId}`);
-        writeFileSync(resultsFile, JSON.stringify({ id: fullId, result: 'pass', confidence: 'kesin', retries: 0 }) + '\n', { flag: 'a' });
+  const runOne = async (id, state) => {
+    const oracle = readOracle(scenariosDir, id);
+    const fullId = state ? `${id}@${state}` : id;
+    const results = [];
+    let envFails = 0;
+    let crashConfirmed = false;
+    for (let n = 1; results.length < attemptsMax && n <= attemptsMax + 2; n++) {
+      if (!deviceAlive(serial)) { envAbort = `cihaz bağlantısı koptu (${serial})`; break; }
+      const r = await attempt(id, state, n);
+      if (r.envError && !r.crash) {
+        envFails++;
+        qlog(`  [ORTAM] ${fullId} deneme ${n}: ${r.reason || 'sürücü hatası'} — tekrar`);
+        if (envFails >= 2) break;
+        await sleep(3000);
         continue;
       }
-      
-      // Failed. Run 2 more retries from clean state
-      qlog(`[RETRY] ${fullId} başarısız oldu. 2 tekrar denemesi yapılıyor...`);
-      let passes = 0;
-      for (let n = 2; n <= 3; n++) {
-        if (pkg) {
-          try { adb('shell', 'am', 'force-stop', pkg); } catch {}
-        }
-        try { adb('reverse', 'tcp:8080', 'tcp:8080'); } catch {}
-        prelaunch();
-        
-        const logN = join(logcatDir, `${fullId}-${n}.txt`);
-        const okN = executeFlow(flowPath, logN);
-        if (okN) passes++;
-      }
-      
-      if (passes === 0) {
-        qlog(`[FAIL] ${fullId} (3/3 fail)`);
-        writeFileSync(resultsFile, JSON.stringify({ id: fullId, result: 'fail', confidence: 'kesin', retries: 2 }) + '\n', { flag: 'a' });
-      } else {
-        qlog(`[FLAKY] ${fullId} (1. fail, tekrarlarda ${passes}/2 geçti)`);
-        writeFileSync(resultsFile, JSON.stringify({ id: fullId, result: 'flaky', confidence: 'flaky-suphesi', retries: 2 }) + '\n', { flag: 'a' });
-      }
+      results.push(r);
+      if (r.ok && results.length === 1) break;
+      const sameCrash = results.filter((x) => x.crash).map((x) => x.crash.key);
+      if (sameCrash.length >= 2 && sameCrash[sameCrash.length - 1] === sameCrash[sameCrash.length - 2]) { crashConfirmed = true; break; }
     }
+    const passes = results.filter((r) => r.ok).length;
+    const lastFail = [...results].reverse().find((r) => !r.ok);
+    let result, confidence;
+    if (!results.length) { result = 'env-error'; confidence = null; }
+    else if (passes === results.length) { result = 'pass'; confidence = 'kesin'; }
+    else if (passes === 0) { result = 'fail'; confidence = results.length >= attemptsMax || crashConfirmed ? 'kesin' : 'muhtemel'; }
+    else { result = 'flaky'; confidence = 'flaky-şüphesi'; }
+    const shots = pngsIn(join(runDir, 'screenshots', state || 'normal'), id).map((f) => `screenshots/${state || 'normal'}/${f}`);
+    const sc = {
+      id: fullId,
+      flow: `${id}.flow.yaml`,
+      title: oracle.title,
+      tier: oracle.tier,
+      state: state || 'normal',
+      result,
+      confidence,
+      attempts: results.length,
+      passes,
+      reason: result === 'env-error' ? (envAbort || 'Maestro sürücüsü/cihaz hatası') : lastFail ? (lastFail.crash ? `${lastFail.crash.title}: ${lastFail.crash.stack[1] || lastFail.crash.text}` : lastFail.reason) : null,
+      crash: lastFail?.crash ? { type: lastFail.crash.type, severity: lastFail.crash.severity, title: lastFail.crash.title, stack: lastFail.crash.stack } : undefined,
+      duration_ms: results.reduce((a, r) => a + r.durationMs, 0),
+      logs: lastFail ? lastFail.evidence : results[0]?.evidence.slice(0, 1) || [],
+      screenshots: shots,
+    };
+    const icon = { pass: '✓', fail: '✗', flaky: '~', 'env-error': '!' }[result];
+    qlog(`  ${icon} ${fullId} — ${result}${sc.reason && result !== 'pass' ? ` (${sc.reason})` : ''}`);
+    scenarios.push(sc);
   };
 
-  // Isınma (puanlanmaz): ilk `maestro test` cihaza sürücü uygulamasını kurar ve
-  // başlatır; bu, ilk senaryonun içinde olursa onu boş ekranla düşürebiliyor
-  // (saha dersi: references/engines.md). Sonuç yok sayılır.
-  const firstPkg = (readFileSync(join(scenariosDir, matchingFiles[0]), 'utf8').match(/^appId:\s*(.+)$/m) || [])[1]?.trim();
-  if (firstPkg) {
-    const warm = join(runDir, '_warmup.flow.yaml');
-    writeFileSync(warm, `appId: ${firstPkg}\n---\n- pressKey: Home\n`);
-    qlog('[WARMUP] Maestro sürücüsü ısıtılıyor (puanlanmaz)');
-    executeFlow(warm, join(logcatDir, '_warmup.txt'));
-  }
-
-  // Run base scenarios
-  await runAllScenarios('');
-
-  // Run matrix states if requested
-  if (matrix.length > 0) {
-    for (const state of matrix) {
-      const restore = applyMatrixState(state);
+  try {
+    for (const state of ['', ...matrix]) {
+      if (envAbort) break;
+      const restore = state ? applyMatrixState(state) : null;
       try {
-        await runAllScenarios(state);
+        for (const id of ids) {
+          if (envAbort) break;
+          await runOne(id, state);
+        }
       } finally {
-        restore();
+        if (restore) restore();
       }
     }
+  } finally {
+    unstabilize();
   }
 
-  // Copy extra findings if seed exists
-  const seedFile = join(appDir, '.qa', 'findings.seed.json');
-  const extraFile = join(runDir, 'findings.extra.json');
-  if (existsSync(seedFile)) {
-    copyFileSync(seedFile, extraFile);
-  }
-
-  // Compile reports
-  compileReport(runDir, appDir);
-}
-
-export function compileReport(runDir, appDir) {
-  const runId = basename(runDir);
-  const ndjsonFile = join(runDir, 'results.ndjson');
-  const ndjson = existsSync(ndjsonFile)
-    ? readFileSync(ndjsonFile, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse)
-    : [];
-
-  const scenDir = join(appDir, '.qa', 'scenarios');
-  
-  function oracle(id) {
-    const baseId = id.replace(/-(dark|large-font|landscape|offline)$/, '');
-    const p = join(scenDir, `${baseId}.yaml`);
-    if (!existsSync(p)) return { title: id, tier: '' };
-    const t = readFileSync(p, 'utf8');
-    const title = (t.match(/^title:\s*(.+)$/m) || [])[1]?.replace(/^["']|["']$/g, '') || baseId;
-    const tier = (t.match(/^tier:\s*(.+)$/m) || [])[1]?.trim() || '';
-    return { title, tier };
-  }
-
-  function getShots(id) {
-    const d = join(runDir, 'screenshots');
-    if (!existsSync(d)) return [];
-    return readdirSync(d).filter((f) => f.startsWith(id + '-') && f.endsWith('.png'))
-      .map((f) => `screenshots/${f}`);
-  }
-
-  const scenarios = ndjson.map((r) => ({ ...r, ...oracle(r.id), screenshots: getShots(r.id) }));
-  
-  const extraFile = join(runDir, 'findings.extra.json');
-  const extra = existsSync(extraFile)
-    ? JSON.parse(readFileSync(extraFile, 'utf8'))
-    : { findings: [] };
-
-  const totals = {
-    passed: scenarios.filter((s) => s.result === 'pass').length,
-    failed: scenarios.filter((s) => s.result === 'fail').length,
-    flaky: scenarios.filter((s) => s.result === 'flaky').length,
-  };
-  const shipReady = totals.failed === 0 && (extra.findings || []).every((f) => f.severity !== 'kritik');
-
-  const report = { 
-    run_id: runId, 
-    generated_from: 'testful/run-suite', 
-    totals, 
-    scenarios, 
-    extra_findings: extra.findings || [], 
-    ship_ready: shipReady 
-  };
-  
-  writeFileSync(join(runDir, 'report.json'), JSON.stringify(report, null, 2));
-
-  const L = [];
-  L.push(`# Testful Raporu — ${runId}`, '');
-  L.push(`**Özet:** ${totals.passed} geçti · ${totals.failed} kaldı · ${totals.flaky} flaky-şüphesi`);
-  L.push('');
-  L.push(`**Piyasaya hazır mı?** ${shipReady ? '✅ Evet — kritik/kesin engel yok' : '❌ Hayır — aşağıdaki engeller var'}`);
-  L.push('');
-  L.push('## Senaryolar', '');
-  L.push('| ID | Başlık | Tier | Sonuç | Güven |');
-  L.push('|---|---|---|---|---|');
-  for (const s of scenarios) {
-    const mark = s.result === 'pass' ? '✅ geçti' : s.result === 'flaky' ? '🟡 flaky' : '❌ kaldı';
-    L.push(`| ${s.id} | ${s.title || ''} | ${s.tier || ''} | ${mark} | ${s.confidence || ''} |`);
-  }
-  L.push('');
-  
-  const fails = scenarios.filter((s) => s.result === 'fail');
-  if (fails.length) {
-    L.push('## Kesin bulgular', '');
-    for (const s of fails) {
-      L.push(`### ${s.id} — ${s.title || ''}`);
-      if (s.screenshots.length) L.push(`- Ekran görüntüleri: ${s.screenshots.join(', ')}`);
-      L.push(`- Log: logcat/${s.id}-1.txt`, '');
-    }
-  }
-  
-  if ((extra.findings || []).length) {
-    L.push('## Ek bulgular (kaos / testability / performans)', '');
-    for (const f of extra.findings) {
-      L.push(`### [${f.severity || 'orta'} · ${f.confidence || ''}] ${f.title}`);
-      if (f.detail) L.push(f.detail);
-      if (f.status) L.push(`- Durum: **${f.status}**`);
-      if (f.evidence) L.push(`- Kanıt: ${f.evidence}`);
-      L.push('');
-    }
-  }
-  
-  const flakies = scenarios.filter((s) => s.result === 'flaky');
-  if (flakies.length) {
-    L.push('## Flaky karantinası (fix loop\'a girmez)', '');
-    for (const s of flakies) L.push(`- ${s.id} — ${s.title || ''} (1. koşu başarısız, tekrarda geçti)`);
-    L.push('');
-  }
-  
-  L.push('## Uygulama haritası', '');
-  L.push('> Kapsama boyalı ekran-geçiş grafiği (graph.json).');
-  L.push('');
-  
-  writeFileSync(join(runDir, 'report.md'), L.join('\n'));
-  qlog(`[REPORT] Rapor yazıldı: ${join(runDir, 'report.md')}`);
+  const report = finalizeReport(runDir, {
+    kind: 'run',
+    app: { package: pkg, framework: detectFramework(cfg.appDir) },
+    device: deviceAlive(serial) ? deviceInfo() : { serial },
+    scenarios,
+    env_error: envAbort,
+  });
+  qlog(`[SONUÇ] ${summaryLine(report)}`);
+  qlog(`[RAPOR] ${join(runDir, 'report.md')}`);
+  return { report, runDir };
 }

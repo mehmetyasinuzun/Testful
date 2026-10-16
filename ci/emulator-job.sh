@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Testful CI: emülatör açıkken koşan ölçüm boru hattı.
-# install → keşif (map) → senaryolar (run) → logcat → kaos (monkey).
+# install → keşif (map) → senaryolar (run) → smoke (soğuk açılış + a11y + kaos).
 # Her aşama ekran videosuna kaydedilir ($OUT/video/<aşama>.mp4).
 # Her adımın sonucu $OUT/steps.env'e yazılır; karar summary.mjs'te verilir.
 # Bu script bilerek 0 ile çıkar: emülatör adımı yarıda kesilmesin, rapor her zaman çıksın.
@@ -13,7 +13,6 @@ T="node $TESTFUL_HOME/cli/testful.mjs"
 mkdir -p "$OUT"
 export TESTFUL_LOG_DIR="$OUT/logs"
 step() { echo "$1=$2" >> "$OUT/steps.env"; }
-touch "$OUT/.start"
 
 # --- Ekran videosu ---------------------------------------------------------
 # screenrecord tek seferde en çok 180 sn kaydeder; aşama boyunca parça parça
@@ -85,12 +84,16 @@ adb logcat -v threadtime > "$OUT/logcat.txt" 2>/dev/null &
 LOGCAT_PID=$!
 trap 'kill "$LOGCAT_PID" 2>/dev/null' EXIT
 if adb install -r -g "$APK"; then step install ok; else step install fail; echo "::endgroup::"; exit 0; fi
-$T animations off || true
 echo "::endgroup::"
 
-echo "::group::Otonom keşif (map, en çok $MAX_ACTIONS eylem)"
+# testful çıkış kodları: 0 hazır · 1 engelleyici bulgu (ölçüm tamam) · 2 kullanım · 3 ortam hatası
+outcome() { case "$1" in 0) echo ok ;; 1) echo findings ;; 3) echo env-error ;; *) echo fail ;; esac; }
+latest_result() { ls -1d "$APP_DIR"/.qa/results/*/ 2>/dev/null | sort | tail -1; }
+
+echo "::group::Otonom keşif (map, en çok $MAX_ACTIONS eylem / ${MAX_MINUTES:-8} dk)"
 rec_start 1-kesif
-if $T map --pkg "$PKG" --out "$OUT/map" --max "$MAX_ACTIONS" --max-minutes "${MAX_MINUTES:-8}"; then step map ok; else step map fail; fi
+$T map --pkg "$PKG" --out "$OUT/map" --max "$MAX_ACTIONS" --max-minutes "${MAX_MINUTES:-8}"
+step map "$(outcome $?)"
 rec_stop
 echo "::endgroup::"
 
@@ -99,35 +102,33 @@ if [ "$HAS_SCENARIOS" = "true" ]; then
   rec_start 2-senaryolar
   args=(run "$APP_DIR" "$SCENARIOS_GLOB")
   [ -n "$MATRIX" ] && args+=(--matrix "$MATRIX")
-  if node "$TESTFUL_HOME/cli/testful.mjs" "${args[@]}"; then step run ok; else step run fail; fi
+  node "$TESTFUL_HOME/cli/testful.mjs" "${args[@]}"
+  step run "$(outcome $?)"
   rec_stop
-  latest="$(ls -1d "$APP_DIR"/.qa/results/*/ 2>/dev/null | sort | tail -1)"
-  if [ -n "$latest" ]; then
-    cp -r "$latest" "$OUT/run"
-    # Maestro takeScreenshot çıktısını sürüme göre farklı yere yazar; koşu sırasında
-    # oluşan tüm png'leri topla.
-    mkdir -p "$OUT/run/screenshots"
-    find "$APP_DIR" "$HOME/.maestro" -name '*.png' -newer "$OUT/.start" \
-      -not -path "$OUT/*" -exec cp -n {} "$OUT/run/screenshots/" \; 2>/dev/null
-  fi
+  latest="$(latest_result)"
+  [ -n "$latest" ] && cp -r "$latest" "$OUT/run"
   echo "::endgroup::"
 else
   step run skipped
 fi
 
 if [ "${MONKEY_EVENTS:-0}" -gt 0 ] 2>/dev/null; then
-  echo "::group::Kaos (monkey, $MONKEY_EVENTS olay, seed 42)"
+  echo "::group::Smoke + kaos (soğuk açılış, a11y, monkey $MONKEY_EVENTS olay, seed 42)"
   rec_start 3-kaos
-  $T monkey "$PKG" "$MONKEY_EVENTS" 42 "$OUT/monkey-logcat.txt" && step monkey ok || step monkey fail
+  before="$(latest_result)"
+  $T smoke "$APP_DIR" --pkg "$PKG" --events "$MONKEY_EVENTS" --seed 42
+  step smoke "$(outcome $?)"
   rec_stop
+  latest="$(latest_result)"
+  [ -n "$latest" ] && [ "$latest" != "$before" ] && cp -r "$latest" "$OUT/smoke"
   echo "::endgroup::"
 else
-  step monkey skipped
+  step smoke skipped
 fi
 
 # Son durumun ekran görüntüsü (çökme sonrası teşhis için).
 adb exec-out screencap -p > "$OUT/final.png" 2>/dev/null || true
 kill "$LOGCAT_PID" 2>/dev/null; wait "$LOGCAT_PID" 2>/dev/null
 rec_merge
-rm -f "$OUT/.start" "$OUT/.rec-stop"
+rm -f "$OUT/.rec-stop"
 exit 0

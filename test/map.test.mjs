@@ -11,6 +11,9 @@ const { map } = await import('../cli/lib/map.mjs');
 const PKG = 'dev.fake.app';
 const out = () => mkdtempSync(join(tmpdir(), 'testful-map-'));
 const titles = (g) => Object.values(g.nodes).map((n) => n.interactives.map((e) => e.label)).flat();
+let secretsNow = {};
+const currentSecrets = () => secretsNow;
+const withSecrets = async (vars, fn) => { secretsNow = vars; try { return await fn(); } finally { secretsNow = {}; } };
 const withEnv = async (vars, fn) => {
   const old = {};
   for (const k of Object.keys(vars)) { old[k] = process.env[k]; process.env[k] = vars[k]; }
@@ -34,7 +37,7 @@ const treeApp = {
 
 test('ağaç uygulamada tüm ekranları bulur, riskli butona dokunmaz, kör döngüye girmeden durur', async () => {
   const dev = fakeDevice(treeApp);
-  const g = await map({ pkg: PKG, out: out(), maxActions: 200, device: dev });
+  const g = await map({ pkg: PKG, out: out(), maxActions: 200, device: dev, sleep: dev.sleep });
   const screenTitles = new Set(titles(g));
   for (const t of ['Profil', 'Ayarlar', 'Düzenle', 'Hakkında']) assert.ok(screenTitles.has(t), `eksik: ${t}`);
   assert.equal(g.stats.screens >= 5, true, `ekran sayısı: ${g.stats.screens}`);
@@ -61,7 +64,7 @@ const listApp = {
 
 test('kaydırarak görünmeyen öğeleri bulur; kaydırılmış görünüm yeni ekran sayılmaz', async () => {
   const dev = fakeDevice(listApp);
-  const g = await map({ pkg: PKG, out: out(), maxActions: 100, device: dev });
+  const g = await map({ pkg: PKG, out: out(), maxActions: 100, device: dev, sleep: dev.sleep, secrets: currentSecrets() });
   assert.ok(titles(g).includes('Ürün 12'), 'listenin sonundaki öğe bulunmadı');
   assert.ok(titles(g).includes('Sepete ekle'), 'kaydırma sonrası açılan ekran bulunmadı');
   assert.equal(g.stats.screens, 2, `beklenen 2 ekran (liste + detay), bulunan ${g.stats.screens}`);
@@ -93,9 +96,9 @@ const loginApp = {
 };
 
 test('giriş bilgisi verilirse login duvarını geçip içeriyi keşfeder', async () => {
-  await withEnv({ TESTFUL_LOGIN_USER: 'qa@ornek.com', TESTFUL_LOGIN_PASSWORD: 'G1zli&şifre' }, async () => {
+  await withSecrets({ MAESTRO_EMAIL: 'qa@ornek.com', MAESTRO_PASSWORD: 'G1zli&şifre' }, async () => {
     const dev = fakeDevice(loginApp);
-    const g = await map({ pkg: PKG, out: out(), maxActions: 100, device: dev });
+    const g = await map({ pkg: PKG, out: out(), maxActions: 100, device: dev, sleep: dev.sleep, secrets: currentSecrets() });
     assert.ok(dev.state.loggedIn, 'giriş yapılamadı');
     assert.ok(titles(g).includes('Raporlar'), 'giriş sonrası ekran keşfedilmedi');
     assert.equal(g.stats.forms_submitted >= 1, true);
@@ -103,9 +106,9 @@ test('giriş bilgisi verilirse login duvarını geçip içeriyi keşfeder', asyn
 });
 
 test('giriş bilgisi yoksa formu sahte değerle dener, hata ekranını raporlar ve durur', async () => {
-  await withEnv({ TESTFUL_LOGIN_USER: '', TESTFUL_LOGIN_PASSWORD: '' }, async () => {
+  await withSecrets({}, async () => {
     const dev = fakeDevice(loginApp);
-    const g = await map({ pkg: PKG, out: out(), maxActions: 100, device: dev });
+    const g = await map({ pkg: PKG, out: out(), maxActions: 100, device: dev, sleep: dev.sleep, secrets: currentSecrets() });
     assert.equal(dev.state.loggedIn, false);
     assert.ok(titles(g).includes('Tekrar dene'), 'hata ekranı keşfedilmedi');
     assert.ok(g.stats.actions < 40, `dokunuş: ${g.stats.actions}`);
@@ -132,18 +135,18 @@ const reloginApp = {
 };
 
 test('uygulamadan çıkınca giriş formunu yeniden doldurup kalan ekranlara döner', async () => {
-  await withEnv({ TESTFUL_LOGIN_USER: 'qa@x.com', TESTFUL_LOGIN_PASSWORD: 'pw' }, async () => {
+  await withSecrets({ MAESTRO_EMAIL: 'qa@x.com', MAESTRO_PASSWORD: 'pw' }, async () => {
     const dev = fakeDevice(reloginApp);
     // Her açılışta oturum sıfırlanır ve alanlar boştur (gerçek uygulama gibi)
     const launch = dev.launch;
     dev.launch = (pkg, o) => { dev.state.typed = {}; launch(pkg, o); };
-    const g = await map({ pkg: PKG, out: out(), maxActions: 100, device: dev });
+    const g = await map({ pkg: PKG, out: out(), maxActions: 100, device: dev, sleep: dev.sleep, secrets: currentSecrets() });
     for (const t of ['Rapor 1', 'Düzenle']) assert.ok(titles(g).includes(t), `yeniden giriş sonrası keşfedilmedi: ${t}`);
   });
 });
 
 test('maxActions sınırına uyar', async () => {
   const dev = fakeDevice(treeApp);
-  const g = await map({ pkg: PKG, out: out(), maxActions: 3, device: dev });
+  const g = await map({ pkg: PKG, out: out(), maxActions: 3, device: dev, sleep: dev.sleep });
   assert.ok(g.stats.actions <= 3);
 });

@@ -1,7 +1,14 @@
 # Senaryo Paketleri ve Oracle Formatı
 
 ## Format (oracle'lı adım — zorunlu)
-Senaryolar `.qa/scenarios/<ID>-<slug>.yaml` olarak kalıcıdır ve commit'lenir.
+Her senaryo bir ÇİFTTİR ve commit'lenir:
+- `.qa/scenarios/<ID>.yaml` — oracle (insan/AI okur: amaç, adımlar, beklenenler)
+- `.qa/scenarios/<ID>.flow.yaml` — Maestro flow (`testful run` bunu koşar)
+
+`testful author --from-map` her keşfedilen ekran için bu çifti AI'sız üretir
+(`LAUNCH-00`, `NAV-<imza>`); mevcut dosyaları ASLA ezmez (`--force` hariç).
+Elle/AI ile yazılan senaryolar arketip kimliği taşır (`AUTH-01`, `MAP-02`...).
+Kimlik bilgileri flow'a yazılmaz: `.qa/env.local` → `${MAESTRO_EMAIL}`.
 Her adım bir eylem + gözlemlenebilir beklenen sonuç (`expect`) taşır.
 `expect` yazılamıyorsa o adım senaryoya giremez.
 
@@ -12,6 +19,8 @@ archetype: map
 tier: core
 engine: maestro          # maestro | patrol | fallback
 package: com.example.app
+goal: "kullanıcı bir yer arayıp rotayı görebilmeli"
+final_assertion: "rota çizgisi ve süre/mesafe kartı görünür"
 preconditions:
   - reset-app
   - grant: [ACCESS_FINE_LOCATION]   # izin diyaloğu test edilmiyorsa ön-ver
@@ -32,7 +41,8 @@ steps:
     shot: true
 ```
 
-`shot: true` adımları ekran görüntüsü alır. Vision yalnız fail eden ya da
+`goal` + `final_assertion` (Firebase App Testing Agent'tan ilham): vision hakemine
+tek, net bir başarı ölçütü verir. `shot: true` adımları ekran görüntüsü alır. Vision yalnız fail eden ya da
 `shot: true` işaretli kritik adımlara, `expect` cümlesi üzerinden **evet/hayır**
 sorusuyla çağrılır.
 

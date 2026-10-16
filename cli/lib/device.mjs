@@ -1,109 +1,223 @@
 import { execFileSync } from 'node:child_process';
-import { writeFileSync, readFileSync, existsSync } from 'node:fs';
-import { resolveAdb } from './platform.mjs';
+import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { EnvError } from './errors.mjs';
 
-// null ise doctor raporlar; adb gerektiren komutlar adb() çağrısında hata verir
-export const ADB = resolveAdb();
-export const adb = (...a) => {
-  if (!ADB) throw new Error('adb bulunamadı (PATH, ANDROID_HOME ya da varsayılan Android SDK konumu)');
-  return execFileSync(ADB, a, { maxBuffer: 64e6 });
-};
-export const adbStr = (...a) => adb(...a).toString('utf8');
+const IS_WIN = process.platform === 'win32';
+
+export function sdkRoot() {
+  const cands = [
+    process.env.ANDROID_HOME,
+    process.env.ANDROID_SDK_ROOT,
+    IS_WIN && process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, 'Android', 'Sdk'),
+    process.platform === 'darwin' && join(homedir(), 'Library', 'Android', 'sdk'),
+    join(homedir(), 'Android', 'Sdk'),
+  ].filter(Boolean);
+  return cands.find((p) => existsSync(p)) || cands[0] || '';
+}
+
+export const sdkTool = (rel) => join(sdkRoot(), rel + (IS_WIN ? (rel.includes('cmdline-tools') ? '.bat' : '.exe') : ''));
+
+let adbPath = null;
+export function resolveAdb({ optional = false } = {}) {
+  if (adbPath) return adbPath;
+  for (const cand of [process.env.ADB, 'adb', sdkTool('platform-tools/adb')]) {
+    if (!cand) continue;
+    try {
+      execFileSync(cand, ['version'], { stdio: 'ignore', timeout: 15000 });
+      adbPath = cand;
+      return adbPath;
+    } catch {}
+  }
+  if (optional) return null;
+  throw new EnvError('adb bulunamadı (PATH, ANDROID_HOME ya da varsayılan SDK konumu). Kurulum: Android SDK platform-tools');
+}
+
+const TRANSIENT = /device offline|device '.*' not found|no devices\/emulators found|device still connecting|closed|connection reset/i;
+
+export function waitForDevice(timeout = 60000) {
+  try {
+    execFileSync(resolveAdb(), ['wait-for-device'], { stdio: 'ignore', timeout });
+    for (let i = 0; i < 30; i++) {
+      const out = execFileSync(resolveAdb(), ['shell', 'getprop', 'sys.boot_completed'], { timeout: 10000 }).toString().trim();
+      if (out === '1') return true;
+      execFileSync(resolveAdb(), ['shell', 'sleep', '1'], { stdio: 'ignore', timeout: 10000 });
+    }
+  } catch {}
+  return false;
+}
+
+export function adb(args, { timeout = 120000, input } = {}) {
+  const run = () => execFileSync(resolveAdb(), args, { maxBuffer: 256e6, timeout, input, stdio: ['pipe', 'pipe', 'pipe'] });
+  try {
+    return run();
+  } catch (e) {
+    const msg = `${e.stderr || ''}${e.message || ''}`;
+    if (!TRANSIENT.test(msg) || !waitForDevice()) throw e;
+    return run();
+  }
+}
+export const adbStr = (args, opts) => adb(args, opts).toString('utf8');
+export const shell = (...args) => adbStr(['shell', ...args]);
+export const tryShell = (...args) => { try { return shell(...args); } catch { return ''; } };
+
+export function listDevices() {
+  const lines = adbStr(['devices']).split(/\r?\n/).slice(1).map((l) => l.trim()).filter(Boolean);
+  return lines.map((l) => {
+    const [serial, state] = l.split(/\s+/);
+    return { serial, state };
+  });
+}
 
 export function requireDevice() {
-  const lines = adbStr('devices').trim().split(/\r?\n/).slice(1).filter(Boolean);
-  const dev = lines.find((l) => l.endsWith('\tdevice'));
-  if (!dev) throw new Error('bağlı cihaz yok (emülatör başlat: emulator -avd testful -snapshot temiz)');
-  return dev.split('\t')[0];
+  const devs = listDevices();
+  const wanted = process.env.ANDROID_SERIAL;
+  if (wanted) {
+    const d = devs.find((x) => x.serial === wanted);
+    if (!d || d.state !== 'device') throw new EnvError(`ANDROID_SERIAL=${wanted} hazır değil (durum: ${d?.state || 'yok'})`);
+    return wanted;
+  }
+  const ready = devs.filter((d) => d.state === 'device');
+  if (!ready.length) {
+    const unauth = devs.find((d) => d.state === 'unauthorized');
+    if (unauth) throw new EnvError(`cihaz yetkisiz (${unauth.serial}): telefonda USB hata ayıklama iznini onayla`);
+    throw new EnvError('bağlı cihaz yok — emülatörü başlat: emulator -avd testful  (ya da USB ile cihaz bağla)');
+  }
+  process.env.ANDROID_SERIAL = ready[0].serial;
+  return ready[0].serial;
+}
+
+export function deviceInfo() {
+  const prop = (k) => tryShell('getprop', k).trim();
+  return {
+    serial: process.env.ANDROID_SERIAL || null,
+    model: prop('ro.product.model'),
+    android: prop('ro.build.version.release'),
+    sdk: prop('ro.build.version.sdk'),
+    kind: (process.env.ANDROID_SERIAL || '').startsWith('emulator-') ? 'emulator' : 'device',
+  };
 }
 
 export function dumpTree() {
   for (let i = 0; i < 3; i++) {
     try {
-      const out = adbStr('exec-out', 'uiautomator', 'dump', '/dev/tty');
-      const xml = out.slice(out.indexOf('<?xml'), out.lastIndexOf('>') + 1);
-      if (xml.includes('<hierarchy')) return xml;
+      const out = adbStr(['exec-out', 'uiautomator', 'dump', '/dev/tty'], { timeout: 60000 });
+      const start = out.indexOf('<?xml');
+      const end = out.lastIndexOf('>');
+      if (start > -1 && out.includes('<hierarchy')) return out.slice(start, end + 1);
     } catch {}
-    try { adb('shell', 'sleep', '0.6'); } catch {}
+    tryShell('sleep', '0.6');
   }
-  throw new Error('uiautomator dump 3 denemede başarısız');
+  throw new EnvError('uiautomator dump 3 denemede başarısız (ekran kilitli ya da uygulama sürekli animasyonda olabilir)');
 }
 
-export const screenshot = () => adb('exec-out', 'screencap', '-p');
-/** Ekran yoğunluğu (dpi); varsa Override değeri. Dokunma hedefi (dp) hesabı için. */
-export function density() {
-  try {
-    const out = adbStr('shell', 'wm', 'density');
-    const m = out.match(/Override density: (\d+)/) || out.match(/Physical density: (\d+)/);
-    return m ? Number(m[1]) : null;
-  } catch { return null; }
+export const shQuote = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
+
+export const screenshot = () => adb(['exec-out', 'screencap', '-p']);
+export const tap = (x, y) => shell('input', 'tap', String(Math.round(x)), String(Math.round(y)));
+export const typeText = (s) => shell('input', 'text', shQuote(String(s).replace(/ /g, '%s')));
+export function clearField(len = 0) {
+  shell('input', 'keyevent', 'KEYCODE_MOVE_END');
+  const n = Math.min(Math.max(len, 0) + 2, 200);
+  for (let i = 0; i < n; i += 50) shell('input', 'keyevent', ...Array(Math.min(50, n - i)).fill('67'));
 }
-export const tap = (x, y) => adb('shell', 'input', 'tap', String(x), String(y));
-/**
- * `adb shell input text` argümanı cihaz kabuğunda yorumlanır: kabuk metakarakterleri
- * kaçırılmazsa "P@ss&w0rd" gibi bir şifre bozulur ya da komut olarak çalışır.
- * Boşluk → %s (input text sözdizimi).
- */
-export const escapeInputText = (s) => String(s).replace(/([\\'"`$&|;<>()[\]{}*?!~#^])/g, '\\$1').replace(/ /g, '%s');
-export const typeText = (s) => adb('shell', 'input', 'text', escapeInputText(s));
-export const swipe = (x1, y1, x2, y2, ms = 350) => adb('shell', 'input', 'swipe', String(x1), String(y1), String(x2), String(y2), String(ms));
-// Alanı temizle: sona git + 40× DEL (tek input çağrısında, hızlı)
-export const clearField = () => adb('shell', 'input', 'keyevent', 'KEYCODE_MOVE_END', ...Array(40).fill('67'));
-export const back = () => adb('shell', 'input', 'keyevent', 'KEYCODE_BACK');
-export const hideKb = () => adb('shell', 'input', 'keyevent', '111');
-export const sleepOnDevice = (sec) => adb('shell', 'sleep', String(sec));
+export const back = () => shell('input', 'keyevent', 'KEYCODE_BACK');
+export const swipe = (x1, y1, x2, y2, ms = 350) => shell('input', 'swipe', ...[x1, y1, x2, y2, ms].map((v) => String(Math.round(v))));
+export const hideKb = () => shell('input', 'keyevent', 'KEYCODE_ESCAPE');
+
+export const collapseShade = () => tryShell('cmd', 'statusbar', 'collapse');
+
+export function isInstalled(pkg) {
+  return tryShell('pm', 'path', pkg).includes('package:');
+}
+
+export function installApk(apk) {
+  if (!existsSync(apk)) throw new EnvError(`APK bulunamadı: ${apk}`);
+  const out = adbStr(['install', '-r', '-t', apk], { timeout: 600000 });
+  if (!/Success/.test(out)) throw new EnvError(`APK kurulamadı: ${out.trim().split('\n').pop()}`);
+  waitForDevice();
+}
+
+export function launchActivity(pkg) {
+  const out = tryShell('cmd', 'package', 'resolve-activity', '--brief', pkg).trim().split(/\r?\n/).pop()?.trim() || '';
+  return out.includes('/') ? out : null;
+}
 
 export function launch(pkg, { clear = false } = {}) {
-  adb('shell', 'am', 'force-stop', pkg);
-  if (clear) adb('shell', 'pm', 'clear', pkg);
-  try {
-    const act = adbStr('shell', 'cmd', 'package', 'resolve-activity', '--brief', pkg).trim().split('\n').pop().trim();
-    if (act.includes('/')) { adb('shell', 'am', 'start', '-n', act); return; }
-  } catch {}
-  adb('shell', 'monkey', '-p', pkg, '-c', 'android.intent.category.LAUNCHER', '1');
+  collapseShade();
+  tryShell('am', 'force-stop', pkg);
+  if (clear) tryShell('pm', 'clear', pkg);
+  const act = launchActivity(pkg);
+  if (act) { shell('am', 'start', '-n', act); return; }
+  shell('monkey', '-p', pkg, '-c', 'android.intent.category.LAUNCHER', '1');
+}
+
+export function coldStartMs(pkg) {
+  const act = launchActivity(pkg);
+  if (!act) return null;
+  tryShell('am', 'force-stop', pkg);
+  const out = tryShell('am', 'start', '-W', '-n', act);
+  const m = out.match(/TotalTime:\s*(\d+)/);
+  return m ? Number(m[1]) : null;
 }
 
 export function setAnimations(mode = 'off') {
   const v = mode === 'on' ? '1' : '0';
-  adb('shell', 'settings', 'put', 'global', 'window_animation_scale', v);
-  adb('shell', 'settings', 'put', 'global', 'transition_animation_scale', v);
-  adb('shell', 'settings', 'put', 'global', 'animator_duration_scale', v);
+  for (const k of ['window_animation_scale', 'transition_animation_scale', 'animator_duration_scale']) {
+    shell('settings', 'put', 'global', k, v);
+  }
+}
+
+const demo = (...extra) => tryShell('am', 'broadcast', '-a', 'com.android.systemui.demo', ...extra);
+
+export function stabilize() {
+  const keys = ['window_animation_scale', 'transition_animation_scale', 'animator_duration_scale'];
+  const prevAnim = keys.map((k) => [k, tryShell('settings', 'get', 'global', k).trim()]);
+  const prevDemo = tryShell('settings', 'get', 'global', 'sysui_demo_allowed').trim();
+  setAnimations('off');
+  tryShell('settings', 'put', 'global', 'sysui_demo_allowed', '1');
+  demo('-e', 'command', 'enter');
+  demo('-e', 'command', 'clock', '-e', 'hhmm', '1200');
+  demo('-e', 'command', 'battery', '-e', 'level', '100', '-e', 'plugged', 'false');
+  demo('-e', 'command', 'network', '-e', 'wifi', 'show', '-e', 'level', '4');
+  demo('-e', 'command', 'notifications', '-e', 'visible', 'false');
+  let restored = false;
+  return () => {
+    if (restored) return;
+    restored = true;
+    demo('-e', 'command', 'exit');
+    if (prevDemo && prevDemo !== 'null') tryShell('settings', 'put', 'global', 'sysui_demo_allowed', prevDemo);
+    for (const [k, v] of prevAnim) if (v && v !== 'null') tryShell('settings', 'put', 'global', k, v);
+  };
 }
 
 export function resetApp(pkg) {
-  adb('shell', 'am', 'force-stop', pkg);
-  adb('shell', 'pm', 'clear', pkg);
+  tryShell('am', 'force-stop', pkg);
+  tryShell('pm', 'clear', pkg);
 }
 
-export function runMonkey(pkg, n = 3000, seed = 42, logcatFile) {
-  try { adb('logcat', '-c'); } catch {}
+export function clearLogcat() {
+  try { adb(['logcat', '-c']); } catch {}
+  try { adb(['logcat', '-b', 'crash', '-c']); } catch {}
+}
+
+export function dumpLogcat() {
+  try { return adbStr(['logcat', '-d', '-v', 'threadtime', '-b', 'main', '-b', 'system', '-b', 'crash'], { timeout: 60000 }); }
+  catch { return null; }
+}
+
+export function runMonkey(pkg, { events = 3000, seed = 42, throttle = 50 } = {}) {
   try {
-    adb('shell', 'monkey', '-p', pkg, '-s', String(seed), '--throttle', '50', '--pct-syskeys', '0', '--ignore-timeouts', '-v', String(n));
-  } catch {}
-  const log = adb('logcat', '-d');
-  writeFileSync(logcatFile, log);
+    return adbStr(['shell', 'monkey', '-p', pkg, '-s', String(seed), '--throttle', String(throttle),
+      '--pct-syskeys', '0', '--pct-appswitch', '0', '--ignore-timeouts', '-v', String(events)], { timeout: 1800000 });
+  } catch (e) {
+    return (e.stdout?.toString() || '') + (e.stderr?.toString() || '');
+  }
 }
 
-export function scanLogcat(logcatFile) {
-  if (!existsSync(logcatFile)) return { clean: true, hits: [] };
-  const content = readFileSync(logcatFile, 'utf8');
-  const patterns = [
-    /FATAL EXCEPTION/i,
-    /ANR in /i,
-    /Force finishing activity/i,
-    /E\/flutter/i,
-    /RenderFlex overflowed/i,
-    /OutOfMemoryError/i,
-    /native crash/i,
-    /CRASH/i
-  ];
-  const lines = content.split('\n');
-  const hits = [];
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (patterns.some(p => p.test(line))) {
-      hits.push({ lineNum: i + 1, content: line.trim() });
-    }
+export function reverse(ports = []) {
+  for (const p of ports) {
+    try { adb(['reverse', `tcp:${p}`, `tcp:${p}`]); } catch {}
   }
-  return { clean: hits.length === 0, hits };
 }

@@ -38,10 +38,10 @@ on:
       workload-identity-provider: { type: string, default: '' }
       service-account:           { type: string, default: '' }
     secrets:
-      TESTFUL_LOGIN_USER: { required: false }
-      TESTFUL_LOGIN_PASSWORD: { required: false }
-      TESTFUL_LOGIN_OTP: { required: false }
-      TESTFUL_LOGIN_PHONE: { required: false }
+      MAESTRO_EMAIL: { required: false }
+      MAESTRO_PASSWORD: { required: false }
+      MAESTRO_OTP: { required: false }
+      MAESTRO_PHONE: { required: false }
       SUPABASE_URL: { required: false }
       SUPABASE_SERVICE_ROLE_KEY: { required: false }
       ANTHROPIC_API_KEY: { required: false }
@@ -80,10 +80,10 @@ jobs:
           visual-judge: ${{ inputs.visual-judge }}
           judge-model: ${{ inputs.judge-model }}
           judge-max-screens: ${{ inputs.judge-max-screens }}
-          login-user: ${{ secrets.TESTFUL_LOGIN_USER }}
-          login-password: ${{ secrets.TESTFUL_LOGIN_PASSWORD }}
-          login-otp: ${{ secrets.TESTFUL_LOGIN_OTP }}
-          login-phone: ${{ secrets.TESTFUL_LOGIN_PHONE }}
+          login-user: ${{ secrets.MAESTRO_EMAIL }}
+          login-password: ${{ secrets.MAESTRO_PASSWORD }}
+          login-otp: ${{ secrets.MAESTRO_OTP }}
+          login-phone: ${{ secrets.MAESTRO_PHONE }}
           supabase-url: ${{ secrets.SUPABASE_URL }}
           supabase-service-role-key: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}

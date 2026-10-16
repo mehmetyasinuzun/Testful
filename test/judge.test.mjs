@@ -5,12 +5,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 process.env.TESTFUL_LOG_DIR = mkdtempSync(join(tmpdir(), 'testful-log-'));
-const { judge, touchTargetFindings } = await import('../cli/lib/judge.mjs');
+const { judge } = await import('../cli/lib/judge.mjs');
 
-function mapFixture(nodes, density = 420) {
+function mapFixture(nodes) {
   const dir = mkdtempSync(join(tmpdir(), 'testful-judge-'));
   mkdirSync(join(dir, 'screens'));
-  const graph = { package: 'p', device: { density }, nodes: {}, edges: [] };
+  const graph = { package: 'p', nodes: {}, edges: [] };
   nodes.forEach((n, i) => {
     graph.nodes[n.sig] = { order: i + 1, screenshot: `screens/${n.sig}.png`, ...n };
     writeFileSync(join(dir, 'screens', `${n.sig}.png`), Buffer.from(`png-${n.sig}`));
@@ -78,16 +78,6 @@ test('judge: ret ve geçici hata yalnız o ekranı etkiler; kimlik hatası koşu
 
   const auth = fakeClient([Object.assign(new Error('invalid x-api-key'), { status: 401 })]);
   await assert.rejects(judge({ mapDir: dir, client: auth }), /kimlik doğrulaması/);
-});
-
-test('judge: dokunma hedefi kontrolü AI\'sız ve yoğunluğa göre (48dp)', () => {
-  // 420 dpi → 48dp = 126 px
-  const node = { interactives: [btn('Küçük', 90, 90), btn('Yeterli', 200, 130), { kind: 'field', label: 'Ad', bounds: { x1: 0, y1: 0, x2: 50, y2: 50 }, center: { x: 1, y: 1 } }] };
-  const f = touchTargetFindings(node, 420);
-  assert.equal(f.length, 1);
-  assert.match(f[0].title, /Küçük/);
-  assert.equal(f[0].confidence, 'kesin');
-  assert.deepEqual(touchTargetFindings(node, null), []);
 });
 
 test('judge: anahtar yoksa açık hata verir', async () => {

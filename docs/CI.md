@@ -41,8 +41,8 @@ yansır (hepsi `@main`'i çağırır) — repo başına bakım yok.
 | Test kullanıcısı | Supabase anahtarları varsa onaylı test hesabı hazırlanır (aşağıda) |
 | Kurulum | API 34 x86_64 emülatör (Pixel 6, 3 çekirdek), animasyonlar kapalı |
 | Otonom keşif | `testful map`: dokunur, **kaydırır**, **giriş/OTP formunu doldurur**, işi kalan ekrana bilinen yoldan gider; riskli butonlara (sil/çıkış/ödeme) dokunmaz |
-| Senaryolar | `.qa/scenarios/*.flow.yaml` varsa Maestro ile (3× tekrar + flaky karantina) |
-| Kaos | Sabit seed'li monkey (varsayılan 1000 olay) |
+| Senaryolar | `.qa/scenarios/*.flow.yaml` varsa `testful run` (izolasyon, 3× tekrar, flaky karantina, önceki koşuyla fark); `testful author --from-map` haritadan üretebilir |
+| Smoke + kaos | `testful smoke`: soğuk açılış süresi, açılış çökmesi, ilk ekran a11y, sabit seed'li monkey (varsayılan 1000 olay) |
 | Görsel hakem | `ANTHROPIC_API_KEY` varsa her benzersiz ekran Claude ile değerlendirilir (aşağıda) |
 | Analiz | Yalnız uygulamana ait çökme/ANR/native crash/flutter hatası · etiketsiz öğeler · küçük dokunma hedefleri |
 | Video | Her aşama ayrı mp4: `1-kesif`, `2-senaryolar`, `3-kaos` |
@@ -52,7 +52,7 @@ Artifact'lar:
 
 | Ad | İçerik |
 |---|---|
-| `testful-report` | `map/graph.json`, `map/screens/*.png`, `run/report.md`, `run/screenshots/`, kesintisiz `logcat.txt`, `judge.json`, `summary.md` |
+| `testful-report` | `map/graph.json` + `map.md` + `screens/*.png`, `run/report.md` (+ `report.json`, `screenshots/`, Maestro debug), `smoke/report.md`, kesintisiz `logcat.txt`, `judge.json`, `summary.md` |
 | `testful-report-video` | aşama başına mp4 (telefonda oynatılır) |
 | `testful-report-apk` | derlenen APK (telefona indirip kurabilirsin) |
 
@@ -63,6 +63,8 @@ Artifact'lar:
 - `never`: yalnız rapor; hiç kırmızı olmaz.
 
 Flaky senaryolar (ilk koşu kaldı, tekrarda geçti) kırmızı yapmaz, raporda 🟡 görünür.
+**Ortam hataları** (emülatör/Maestro sürücüsü kopması; testful çıkış kodu 3) uygulama
+hatası değildir: sonuç ⚠️ *Belirsiz* olur, uyarı verilir, kırmızı yapmaz.
 Görsel hakem bulguları **hiçbir zaman** kırmızı yapmaz (en düşük kanıt seviyesi).
 
 ## Gizli bilgiler (Secrets) — hepsi isteğe bağlı
@@ -72,10 +74,10 @@ Repo → **Settings → Secrets and variables → Actions → New repository sec
 
 | Secret | Ne için |
 |---|---|
-| `TESTFUL_LOGIN_USER` | Test hesabı e-posta/kullanıcı adı |
-| `TESTFUL_LOGIN_PASSWORD` | Test hesabı şifresi — log ve artifact'larda `***` olarak maskelenir |
-| `TESTFUL_LOGIN_OTP` | Sabit test OTP kodu |
-| `TESTFUL_LOGIN_PHONE` | Telefonla giriş için test numarası |
+| `MAESTRO_EMAIL` | Test hesabı e-posta/kullanıcı adı |
+| `MAESTRO_PASSWORD` | Test hesabı şifresi — log ve artifact'larda `***` olarak maskelenir |
+| `MAESTRO_OTP` | Sabit test OTP kodu |
+| `MAESTRO_PHONE` | Telefonla giriş için test numarası |
 | `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` | Test kullanıcısını koşudan önce oluştur/eşitle |
 | `ANTHROPIC_API_KEY` | Görsel hakem |
 | `GCP_CREDENTIALS_JSON` | Firebase Test Lab (servis hesabı anahtarı) |
@@ -95,9 +97,9 @@ dosyaya yazma:
 appId: com.sirket.uygulama
 ---
 - tapOn: "E-posta"
-- inputText: ${TESTFUL_LOGIN_USER}
+- inputText: ${MAESTRO_EMAIL}
 - tapOn: "Şifre"
-- inputText: ${TESTFUL_LOGIN_PASSWORD}
+- inputText: ${MAESTRO_PASSWORD}
 - tapOn: "Giriş"
 ```
 
@@ -106,15 +108,15 @@ Diğer senaryolarda: `- runFlow: _login.flow.yaml`. Örnek: [`examples/demo-app/
 ### Supabase kullanan uygulamalar
 
 1. **Ayrı bir staging Supabase projesi** kullan (önerilen); testler üretim verisine dokunmasın.
-2. Secrets: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `TESTFUL_LOGIN_USER`
-   (örn. `qa+testful@alanadin.com`), `TESTFUL_LOGIN_PASSWORD`.
+2. Secrets: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `MAESTRO_EMAIL`
+   (örn. `qa+testful@alanadin.com`), `MAESTRO_PASSWORD`.
 3. Her koşudan önce Testful bu kullanıcıyı Supabase Admin API ile **onaylı** olarak
    oluşturur ya da şifresini eşitler. Güvenlik kuralı: yalnız kendi oluşturduğu
    (işaretlediği) kullanıcıya dokunur; aynı e-postayla gerçek bir kullanıcı varsa
    şifresini **değiştirmez**, hata verir.
 4. Telefon + OTP ile giriş: Supabase panelinde **Authentication → Providers →
    Phone → Test phone numbers and OTPs** altında sabit bir numara/kod tanımla;
-   `TESTFUL_LOGIN_PHONE` ve `TESTFUL_LOGIN_OTP` secrets'ına aynı değerleri yaz.
+   `MAESTRO_PHONE` ve `MAESTRO_OTP` secrets'ına aynı değerleri yaz.
 5. `service_role` anahtarı yalnız CI'da kullanılır; uygulamanın içine asla girmez.
 
 E-posta "magic link" ile giriş otomatikleştirilemez; test için şifreli giriş ya da test telefon numarası kullan.

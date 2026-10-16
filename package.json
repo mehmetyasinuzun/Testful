@@ -1,19 +1,42 @@
 {
   "name": "testful",
   "version": "0.3.0",
-  "description": "Güven-öncelikli, AI-destekli mobil UX/UI test aracı — ölçüm çekirdeği + ince AI kabuğu",
+  "description": "AI ile kod yazanlar için Android test çekirdeği — senaryosuz smoke, otonom harita, haritadan regresyon, güven-öncelikli rapor",
   "type": "module",
   "bin": {
     "testful": "cli/testful.mjs"
   },
+  "files": [
+    "cli/",
+    "ci/",
+    "templates/",
+    "firebase/",
+    "action.yml",
+    ".claude/skills/mobile-ux-test/",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
-    "test": "node --test test/map.test.mjs test/units.test.mjs test/judge.test.mjs test/supabase.test.mjs test/firebase.test.mjs test/field-trials.test.mjs",
+    "test": "node --test",
     "doctor": "node cli/testful.mjs doctor",
     "setup": "node cli/testful.mjs setup"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=18.15"
   },
+  "keywords": [
+    "ai",
+    "android",
+    "ci",
+    "claude-code",
+    "emulator",
+    "flutter",
+    "github-actions",
+    "maestro",
+    "qa",
+    "react-native",
+    "testing"
+  ],
   "license": "MIT",
   "author": "Mehmet Yasin UZUN",
   "repository": {
@@ -22,14 +45,5 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.135.0"
-  },
-  "files": [
-    "cli/",
-    "ci/",
-    "templates/",
-    "action.yml",
-    "firebase/",
-    "README.md",
-    "LICENSE"
-  ]
+  }
 }

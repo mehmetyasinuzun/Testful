@@ -1,211 +1,143 @@
 # Testful 🧭
 
-**Kaynak-koda duyarlı, güven-öncelikli, AI-destekli mobil UX/UI test ajanı.**
-APK'nı ver → uygulamayı otonom gezsin, ekran haritasını çıkarsın, her ekranı
-görsel olarak yargılasın, bulguları tanımlı ve kanıtlı raporlasın — istersen
-kaynak kodda düzeltip yeşile kadar tekrar koşsun.
-
-TestSprite benzeri bulut servislerine **bedava ve self-hosted** alternatif:
-kodun makinenden çıkmaz, koşucu katman tamamen deterministiktir.
-
-> Durum: **Alpha (Faz 1 kanıtlandı).** Boru hattı gerçek bir emülatörde, gerçek
-> bir Flutter uygulamasında (Flutter ekibinin resmî `compass_app` örneği) uçtan
-> uca doğrulandı: 6 senaryo, seed'li kaos taraması, 43 bulguluk vision paneli ve
-> 5 bulgunun kaynak kodda düzeltilip yeniden yeşil koşması dahil. v0.3 ile
-> GitHub Actions'ta bulut emülatöründe koşar (bilgisayarsız), keşif kaydırır ve
-> giriş duvarını geçer, çekirdek Linux/macOS/Windows'ta test edilir ve gerçek
-> açık kaynak uygulamalarda haftalık saha denemesiyle ölçülür. Henüz "canlı"
-> ürün değil — dürüst durum tablosu aşağıda.
-
----
-
-## Mimari: Ölçüm Çekirdeği + İnce AI Kabuğu
+**AI ile kod yazanların test yükünü alan Android test çekirdeği.**
+Kodu Claude Code / Cursor ile değiştir → `testful smoke` + `testful run` → net bir
+karar (`hazır / hazır değil / belirsiz`), kanıtlı bulgular ve "sıradaki adımlar".
+Çekirdek sıfır bağımlılık (saf Node.js), kodun makinenden çıkmaz. İstersen
+**bilgisayarsız**: GitHub Actions'ta bulut emülatöründe her push/PR'da koşar.
 
 ```
-APK (± kaynak kod)
-      │
-┌─────▼──────────────────────────────────────────┐
-│ ÖLÇÜM ÇEKİRDEĞİ — deterministik, AI'SIZ, CI'da │
-│  crawler (explore.mjs) · koşucu (run-suite.sh) │
-│  monkey + logcat imzaları · ekran ağacı + SS   │
-│  → graph.json + ölçüm paketi + report.json     │
-└─────┬──────────────────────────────────────────┘
-      │  yalnız KOMPAKT paket AI'ya gider
-┌─────▼──────────────────────────────────────────┐
-│ İNCE AI KABUĞU — seçici, pakete bakar          │
-│  senaryo yazarı · vision hakemi (ekran başına  │
-│  1 kez, stateless) · kök-neden · git-safe fix  │
-└─────┬──────────────────────────────────────────┘
-      ▼
- Uygulama haritası + tanımlı bulgular + rapor
+APK ──► smoke ──► map ──► author --from-map ──► run [--matrix] ──► report.json + report.md
+        (senaryosuz      (otonom      (her ekrana giden       (izolasyon · 3× retry ·
+         karar)           keşif)       regresyon flow'u)        flaky karantina · diff)
 ```
 
-- **AI asla tık-başına döngüde değildir** — token maliyeti ekran sayısıyla
-  ölçeklenir, context şişmez.
-- **İki yüz, tek boru hattı:** kaynak varsa *Verifier* (niyet-güdümlü isabetli
-  senaryolar + otomatik düzeltme); yalnız APK varsa *Explorer* (otonom keşif +
-  harita + görsel tarama). Kaynak her zaman "harita", çalışan uygulama "arazi".
-- **Güven kuralları:** animasyonlar kapalı · her senaryo `pm clear` izolasyonlu
-  · belirsiz fail 3× tekrar (3/3 = kesin, karışık = flaky-karantina, fix loop'a
-  giremez) · sabit seed'li monkey · kanıt hiyerarşisi: logcat > assert > vision.
+## Neden güvenilir?
 
-## Gereksinimler
+Bir test aracının para birimi **bulgulara duyulan güvendir**. Testful yanlış alarmı
+sistematik olarak eler:
 
-| Gereksinim | Detay |
+| Sorun | Testful'ın yaptığı |
 |---|---|
-| İşletim sistemi | **Windows 10+** yerelde uçtan uca doğrulandı. **Linux** emülatörlü uçtan uca CI'da her push'ta doğrulanır. **macOS** ve Windows'ta çekirdek birim testleri CI'da koşar; macOS'ta yerel emülatörle uçtan uca henüz denenmedi. iOS kapsam dışı. |
-| RAM | **16 GB önerilir** (emülatör ~2-4 GB + Gradle derlemesi ağır). |
-| Disk | **≥ 10 GB boş** (doctor 8 GB altında uyarır). Sistem imajı ~1,5 GB + AVD ~4 GB + Gradle cache. |
-| Java | 17+ (Maestro için) |
-| Android SDK | platform-tools (adb) + emulator + bir AVD (script'ler adb'yi `%LOCALAPPDATA%\Android\Sdk`'dan otomatik bulur) |
-| Node.js | 18+ (crawler + rapor üreteci) |
-| Maestro | CLI ([kurulum](https://docs.maestro.dev/maestro-cli/how-to-install-maestro-cli); Windows'ta native çalışıyor — GitHub release zip + PATH) |
-| Flutter + Patrol | Yalnız Flutter hedefleri ve derin mod için |
-| **API anahtarı** | **Zorunlu değil.** AI kabuğu Claude Code oturumudur (aboneliğin); çekirdek AI'sızdır. Yalnız CI'da otomatik görsel hakem istersen `ANTHROPIC_API_KEY` (BYOK). |
-| **Docker** | **HAYIR.** İzolasyon AVD snapshot ile ("temiz" snapshot = Android'in Docker'ı). Linux CI için Docker Faz 3'te. |
+| Ortam arızası uygulama hatası gibi görünür | Cihaz kopması, dolu disk, Maestro sürücü hatası → `inconclusive` (exit 3), asla "kaldı" değil |
+| Başka sürecin çökmesi (ör. emülatör servisi) | Çökmeler paket adına göre atfedilir; yalnız senin uygulaman bulgu üretir |
+| Tek seferlik kırmızı | 1. fail → 2 tekrar; hepsi fail = **kesin**, karışık = **flaky** (karantina, engellemez) |
+| Animasyon / saat / pil değişkenliği | Koşu boyunca animasyon kapalı + status bar demo modu; ayarlar sonra geri yüklenir |
+| Kirli durum | Her deneme `pm clear` ile başlar |
+| Tahmini seçiciler | Seçiciler gerçek a11y ağacından; regex-güvenli kaçış; benzersiz `resource-id` önceliği |
+| Sır sızıntısı | Kimlik bilgileri `.qa/env.local`'da; flow'lara değer değil `${MAESTRO_EMAIL}` yazılır |
 
-## Hızlı Başlangıç
+## Hızlı başlangıç
 
-### Tek komutla devreye al
-```bash
-git clone https://github.com/mehmetyasinuzun/Testful.git && cd Testful && node cli/testful.mjs doctor
-```
-`doctor` neyin hazır neyin eksik olduğunu söyler. Eksik AVD'yi yerelden kurmak
-için (indirmesiz): `node cli/testful.mjs setup`. CLI'yi global yapmak için:
-`npm link` → artık her yerde `testful ...`.
-
-### A) Claude Code ile (önerilen — tam deneyim)
 ```bash
 git clone https://github.com/mehmetyasinuzun/Testful.git
-cd Testful
-claude   # Claude Code bu klasörde skill'i otomatik tanır
+cd Testful && npm link          # artık her yerde: testful
+testful doctor                  # neyin eksik olduğunu söyler (exit 0 = hazır)
+testful setup                   # eksik AVD'yi yerel imajdan + Maestro'yu kurar
 ```
-Sonra Claude'a de ki: *"şu uygulamayı test et: C:\yol\benim_flutter_app"* —
-doctor'dan rapora kadar akışı skill yönetir.
 
-Kendi projende kalıcı kullanmak için skill'i taşı:
+Kendi projende:
+
 ```bash
-# proje-bazlı:
-cp -r .claude/skills/mobile-ux-test  <senin-projen>/.claude/skills/
-# ya da tüm projelerde geçerli olsun: ~/.claude/skills/ altına kopyala
+cd benim-uygulamam
+testful init                    # .qa/testful.json (paket + APK otomatik bulunur), .gitignore, Claude skill'i
+testful smoke --apk build/app/outputs/flutter-apk/app-debug.apk
+testful map                     # otonom keşif → .qa/map/map.md (mermaid harita)
+testful author --from-map       # her ekran için LAUNCH-00 / NAV-<imza> flow'ları (AI'sız)
+testful run                     # tüm .qa/scenarios → rapor
+testful run "NAV-*" --matrix dark,large-font,landscape,offline
 ```
 
-### B) Tek başına, AI'sız (çekirdek)
-Senaryolar bir kez yazıldıktan sonra (elle ya da bir AI oturumunda ürettirip
-commit'leyerek) her şey terminalden, sıfır token'la koşar:
-```bash
-node cli/testful.mjs map --pkg <paket>         # otonom keşif → .qa/map/graph.json
-node cli/testful.mjs judge --map .qa/map       # görsel hakem (ANTHROPIC_API_KEY) → judge.json
-node cli/testful.mjs observe --pkg <paket>     # ekran paketi: ağaç+png+selectors.json
-                                               # (seçiciler GERÇEK ağaçtan: sekme→regex,
-                                               #  etiketsiz alan→koordinat+a11y bulgusu)
-node cli/testful.mjs run <app_dir> "CORE-*"    # suite (bash çekirdeğine delege)
-S=.claude/skills/mobile-ux-test/scripts
-bash $S/doctor.sh                              # ortam sağlık kontrolü
-bash $S/run-suite.sh <app_dir> "CORE-*"        # senaryo paketi + retry + rapor
-node $S/explore.mjs <package> <run_dir> 80     # otonom keşif → graph.json
-bash $S/monkey.sh <package> 3000 42 out.txt    # seed'li kaos + logcat yakala
-bash $S/logcat-scan.sh out.txt                 # çökme/ANR/overflow imzaları
-```
-Çıktılar: `<app_dir>/.qa/results/<run-id>/` → `report.md` (insan) +
-`report.json` (makine) + ekran görüntüleri + logcat.
+Her koşu: `.qa/results/<run-id>/report.md` (insan) + `report.json` (makine) + kanıtlar.
 
-### C) GitHub Actions ile — bilgisayarsız (bulut emülatörü)
-Herhangi bir uygulama reposuna tek dosya ekle; her push/PR'da GitHub'ın KVM'li
-Linux makinesinde gerçek emülatör açılır, APK derlenir (Flutter / React Native /
-Expo / native otomatik algılanır), keşif + senaryo + kaos koşar, sonuç iş
-özetine ve PR yorumuna düşer:
+### Bilgisayarsız: GitHub Actions (bulut emülatörü)
+
+Uygulama reposuna tek dosya (`testful ci-init` üretir). Her push/PR'da GitHub'ın KVM'li
+Linux makinesinde gerçek emülatör açılır, APK derlenir (Flutter / React Native / Expo /
+native otomatik), `map` + `run` + `smoke` koşar; sonuç iş özetine ve PR yorumuna düşer,
+aşama başına **ekran videosu** artifact olarak gelir. Telefondan takip edilebilir.
+
 ```yaml
 jobs:
   testful:
     uses: mehmetyasinuzun/Testful/.github/workflows/testful.yml@main
-```
-Hazır dosya: `node cli/testful.mjs ci-init <repo>` · ayrıntı: [docs/CI.md](docs/CI.md).
-
-## Loglama
-
-Araç çalıştığı yerde günlük log tutar: `<app_dir>/.qa/logs/YYYY-MM-DD.log`
-(zaman damgalı; doctor, koşucu ve crawler aynı dosyaya yazar). Konumu
-`TESTFUL_LOG_DIR` ortam değişkeniyle değiştirebilirsin. `.qa/results/` ve
-loglar gitignore'lanır; `.qa/scenarios/` commit'lenir.
-
-## Sık Sorulanlar
-
-**Claude'a mecbur muyum? DeepSeek/OpenAI ile kullanabilir miyim?**
-Çekirdek için hiçbir AI gerekmez. AI kabuğu (senaryo üretimi, vision hakemliği,
-otomatik düzeltme) bugün Claude Code üzerinden çalışır çünkü agentic bir harness
-ister (dosya okuma/yazma, çok adımlı döngü). **Ancak mimari bilinçli olarak
-provider-bağımsız tasarlandı:** AI'ın sözleşmesi "ölçüm paketi (JSON + ekran
-görüntüsü) al → yapılandırılmış hüküm döndür"dür. Yol haritasındaki `testful
-judge --provider deepseek|openai|anthropic` komutu bu sözleşmeyi vision destekli
-herhangi bir modele (GPT-4o, DeepSeek-VL, Claude API) kendi anahtarınla (BYOK)
-açacak — bkz. Faz 3.
-
-**Tek başına kullanabilir miyim?** Evet — yukarıdaki B modu. AI'sız modda
-kaybettiğin şey: otomatik senaryo üretimi, görsel hakemlik ve otomatik düzeltme.
-Kazandığın: CI'da sıfır maliyetli, deterministik regresyon koşuları.
-
-**Uygulamam login istiyor / OTP var — takılır mı?**
-Test hesabını `TESTFUL_LOGIN_USER` / `_PASSWORD` (gerekirse `_OTP`, `_PHONE`)
-ortam değişkenlerine ver (CI'da GitHub Secrets; yerelde gitignore'lu
-`.qa/config.local.yaml`). Keşif giriş/OTP formunu tanır, doldurur ve gönderir;
-şifre log ve artifact'larda maskelenir. Supabase kullanıyorsan test kullanıcısı
-koşudan önce otomatik hazırlanır ([docs/CI.md](docs/CI.md#supabase-kullanan-uygulamalar)).
-Aşamayacağı duvar (CAPTCHA, e-posta magic link, ödeme) = **blocker protokolü**:
-durur, ekranı gösterir, sana sorar, cevabınla devam eder.
-
-**Hangi çerçeveler?** Flutter (Patrol derin mod + vision), Kotlin/Java native
-ve React Native/Expo (Maestro). Vision katmanı çerçeve-bağımsızdır; en zor hedef
-olan Flutter için tasarlandı — diğerleri daha da rahat.
-
-**Bulgular neye benziyor?** Her bulgu: tür (çökme/a11y/görsel/performans/akış)
-· önem (kritik→düşük) · **güven etiketi (kesin/muhtemel/flaky-şüphesi)** · ekran
-· tekrar adımları · ekran görüntüsü kanıtı · (kaynak varsa) dosya:satır +
-önerilen düzeltme. Örnek çıktı: [examples/sample-report.md](examples/sample-report.md).
-
-## Depo Yapısı
-
-```
-.claude/skills/mobile-ux-test/
-├── SKILL.md               AI kabuğunun beyni (metodoloji + protokoller)
-├── references/            senaryo paketleri · rapor şeması · motor rehberi
-│                          (Maestro/Patrol/adb + saha dersleri)
-└── scripts/               deterministik çekirdek:
-    doctor.sh · run-suite.sh · explore.mjs · report.mjs · monkey.sh
-    logcat-scan.sh · reset-app.sh · animations.sh · screenshot.sh
-    new-run.sh · env.sh · log.sh
-action.yml + ci/            GitHub Actions: derle → emülatör → keşif/senaryo/kaos → özet
-.github/workflows/         testful.yml (diğer repoların çağırdığı) · self-test.yml
-templates/testful-ci.yml   hedef repoya konan tek workflow dosyası
-docs/CI.md                 bulut CI rehberi (telefondan kullanım dahil)
-examples/                  örnek senaryo çifti + örnek rapor + demo-app (CI öz-testi)
-ROADMAP.md                 faz planı ve güncel durum
+    secrets: inherit
 ```
 
-**Senaryo çifti sözleşmesi:** her senaryo = `<ID>.yaml` (Türkçe oracle:
-adım + beklenen gözlemlenebilir sonuç) + `<ID>.flow.yaml` (motor-native Maestro
-akışı). Motor çeviri yapmaz; istersen `maestro test` ile elle de koşarsın —
-kilitlenme yok. Örnek: [examples/scenario-pair/](examples/scenario-pair/).
+İsteğe bağlı: test hesabı (`MAESTRO_EMAIL`/`_PASSWORD` secrets), Supabase test kullanıcısı,
+Claude ile görsel hakem (`ANTHROPIC_API_KEY`), Firebase Test Lab. Ayrıntı: [docs/CI.md](docs/CI.md).
 
-## Yol Haritası ve Durum
+## AI ajanlarıyla kullanım
 
-| Faz | İçerik | Durum |
+Claude Code, `testful init`'in kopyaladığı skill'i (`.claude/skills/mobile-ux-test`)
+otomatik tanır — *"uygulamayı test et"* ya da *"bir şey bozuldu mu bak"* demen yeter.
+Başka bir ajan (Cursor, Codex, Gemini CLI…) için kural basit:
+
+```bash
+testful smoke --json   # stdout: kompakt JSON karar; loglar stderr'de
+testful run --json
+```
+
+| Exit | Durum | Ajan ne yapmalı |
 |---|---|---|
-| 0 — Ortam | skill + script'ler + Maestro/Patrol + AVD "temiz" snapshot + doctor | ✅ |
-| 1 — İlk kanıt | gerçek uygulamada uçtan uca: senaryolar, kaos, 43 bulguluk vision paneli, fix-loop (5 bulgu düzeltildi, smoke yeşil) | ✅ |
-| 1.5 — Explorer | AI'sız keşif crawler'ı + graph.json + günlük log sistemi | ✅ v0 |
-| 2 — Motor | `testful` CLI: observe/map/run/judge/doctor/setup/ci-init ✅ · model tabanlı keşif (kaydırma, giriş/OTP, gezinme) ✅ · durum matrisi ✅ · mermaid harita (CI özeti) ✅ · çapraz platform + 34 birim test ✅ · Maestro'suz sürüş (adb-direct) ⬜ | 🔄 |
-| 3 — Ürünleşme | Linux CI: GitHub Actions bulut emülatörü + video + PR yorumu ✅ · `judge` (Claude, BYOK) ✅ · Supabase test kullanıcısı ✅ · Firebase Test Lab (2027'ye dek) ✅ · diğer AI sağlayıcıları · MCP server · görsel regresyon · run-diff · interaktif HTML harita ⬜ | 🔄 |
-| 4 — Yayılım | çoklu-uygulama stabilite kanıtı (2-3 uygulama × 10 koşu, flakiness ölçümü) · EN dokümantasyon · npm paketi · iOS (macOS) | ⬜ |
+| 0 | `ready` | devam |
+| 1 | `not-ready` | `findings[].detail` (stack/neden) + `evidence` + `next_actions` ile düzelt |
+| 2 | kullanım hatası | komutu düzelt |
+| 3 | `inconclusive` | `testful doctor` → ortamı düzelt; uygulama hatası **değil** |
 
-## Saha Dersleri (kanla yazıldı 🩸)
+AI'ın gördüğü ama CLI'nin göremediği şeyler (görsel bozukluk, yanlış metin) için:
+koşu klasörüne `findings.extra.json` yaz → `testful report <run_dir>` → karar ve fark
+yeniden hesaplanır. Şema: [report-format.md](.claude/skills/mobile-ux-test/references/report-format.md).
 
-Gerçek koşularda öğrenilip `references/engines.md`'de kodlanan dersler:
-Flutter'ın birleşik semantics tuzağı (`[\s\S]*` seçicileri) · Maestro'nun
-Windows dadb hıçkırıkları (`stopApp: false`) · `adb reverse`'in sessiz ölümü
-(host-loopback `10.0.2.2` tercihi) · exit code'a değil artefakta güven ·
-flaky-karantinanın önlediği yanlış alarm · statik ekran görüntüsünün scroll'u
-görememesi (vision yanlış-pozitif dersi).
+## Komutlar
+
+| Komut | Ne yapar |
+|---|---|
+| `init [dir]` | `.qa/` iskeleti, paket/APK tespiti (Gradle, Expo, Manifest), `.gitignore`, skill kopyası |
+| `doctor` | node, adb, cihaz, Maestro, Java 17+, **tüm ilgili disklerin** boş alanı, AVD; Flutter/Patrol opsiyonel |
+| `setup` | AVD'yi yerel sistem imajından oluşturur; Windows'ta Maestro'yu `~/.maestro`'ya kurar (PATH'e dokunmaz) |
+| `smoke` | kur → soğuk açılış süresi → açılış çökmesi → ilk ekran a11y (etiketsiz öğe, < 48dp hedef) → seed'li monkey → logcat imzaları |
+| `observe` | o anki ekran: ağaç + PNG + Maestro seçicileri + a11y sorunları |
+| `map` | otonom keşif: etiketliler önce, riskli butonlar (sil/çıkış/öde…) asla, dolu alanlar ezilmez; **kaydırır**, **giriş/OTP formunu** `MAESTRO_*` sırlarıyla doldurur, işi kalan ekrana bilinen yoldan (BFS) döner, oturum düşerse yeniden girer; `--max-minutes` süre sınırı; takılınca nedenini yazar |
+| `judge` | haritadaki her benzersiz ekranı Claude ile görsel olarak değerlendirir → `judge.json` (`ANTHROPIC_API_KEY`; öneri niteliğinde) |
+| `ci-init [repo]` | repoya GitHub Actions workflow'u ekler (bulut emülatörü, video, PR yorumu) |
+| `author --from-map` | haritadaki her ekrana en kısa yoldan giden flow + oracle çifti; mevcut dosyaları ezmez |
+| `run` | flow'ları koşar; Maestro çıktısından başarısız adımı, logcat'ten çökmeyi çıkarır; `--matrix` ile karanlık/font/yatay/çevrimdışı |
+| `report` | AI bulgularıyla raporu yeniden üretir |
+| `logcat-scan`, `screenshot`, `reset`, `animations` | küçük araçlar |
+
+Ortam değişkenleri: `ANDROID_SERIAL` (çoklu cihazda seçim), `ANDROID_HOME`, `ADB`,
+`MAESTRO`, `TESTFUL_LOG_DIR`, `TESTFUL_PRELAUNCH=1` (ağır APK'larda launch'ı adb'ye ver),
+`TESTFUL_DEBUG=1` (stack trace).
+
+## Gereksinimler
+
+Node 18.15+ · Android SDK platform-tools · bir emülatör ya da USB cihaz · Maestro CLI
+(`run` için) + JDK 17+. Flutter/Patrol yalnız Flutter derin modu için. API anahtarı ve
+Docker **gerekmez**. Windows 10/11'de yerelde uçtan uca doğrulandı; Linux'ta emülatörlü
+uçtan uca her PR'da CI'da koşar; birim testler Linux/macOS/Windows'ta CI'da yeşil. Ayrıntı: [REQUIREMENTS.md](REQUIREMENTS.md).
+
+## Geliştirme
+
+```bash
+npm test        # node:test — cihaz gerektirmeyen tüm katmanlar (ayrıştırma, seçiciler,
+                # logcat imzaları, rapor/diff, author, config, CLI çıkış kodları) +
+                # keşif motoru sahte uygulama simülatöründe uçtan uca (giriş, kaydırma, gezinme)
+```
+
+Mimari: `cli/lib/` altında tek sorumluluklu modüller — `device` (adb, geçici bağlantı
+kopmalarına dayanıklı), `tree` (ağaç → seçici), `logcat` (imzalar), `maestro` (koşucu +
+çıktı sınıflama), `run` / `smoke` / `map` / `author` (komutlar), `report` (karar + fark).
+
+## Saha dersleri
+
+Gerçek koşulardan çıkıp koda/dokümana işlenenler: Flutter'ın birleşik semantics
+düğümleri (`[\s\S]*`) · Maestro'nun Windows dadb hıçkırıkları (`stopApp: false`) ·
+`adb reverse`'in sessiz ölümü (her denemeden önce yeniden uygulanır) · büyük APK
+kurulumu sonrası adb'nin "offline" anı (otomatik `wait-for-device`) · monkey'in açık
+bıraktığı bildirim paneli (otomatik kapatılır) · alan içeriğinin ekran imzasını
+bozması · dolu C: sürücüsünün Maestro JVM'ini sessizce öldürmesi.
+Ayrıntı: [engines.md](.claude/skills/mobile-ux-test/references/engines.md).
 
 ## Lisans
 

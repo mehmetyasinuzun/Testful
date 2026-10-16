@@ -2,14 +2,13 @@
 // Claude'a gösterir ve yapılandırılmış (JSON şemalı) UX/UI bulguları alır.
 //
 // Güven hiyerarşisinde en alt kanıttır (logcat > assert > vision): bulgular rapora
-// "muhtemel/zayıf" güvenle girer, CI'ı varsayılan olarak kırmızı yapmaz.
-// Deterministik kontroller (dokunma hedefi boyutu, etiketsiz öğe) AI'sız yapılır.
+// "muhtemel/zayıf" güvenle girer, CI'ı kırmızı yapmaz. Deterministik a11y kontrolleri
+// (etiketsiz öğe, küçük dokunma hedefi) AI'sız olarak tree.a11yIssues'tadır.
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { qlog } from './log.mjs';
 
 export const DEFAULT_MODEL = 'claude-opus-5-5';
-const MIN_TOUCH_DP = 48; // Material / WCAG 2.5.8 önerisi
 
 const FINDINGS_SCHEMA = {
   type: 'object',
@@ -47,21 +46,6 @@ Kurallar:
 - Zevk tercihlerini (renk seçimi, yazı tipi beğenisi) bulgu yapma; somut kullanılabilirlik etkisi olmalı.
 - Sorun yoksa boş bulgu listesi döndür. Az ve doğru bulgu, çok ve şüpheli bulgudan iyidir.
 - Tüm metinleri Türkçe yaz.`;
-
-/** dp → px: dokunma hedefi kontrolü için cihaz yoğunluğu (dpi / 160). */
-export function touchTargetFindings(node, density) {
-  if (!density) return [];
-  const minPx = Math.round((MIN_TOUCH_DP * density) / 160);
-  return (node.interactives || [])
-    .filter((e) => e.kind !== 'field' && e.bounds)
-    .filter((e) => Math.min(e.bounds.x2 - e.bounds.x1, e.bounds.y2 - e.bounds.y1) < minPx)
-    .map((e) => ({
-      category: 'erişilebilirlik', severity: 'orta', confidence: 'kesin', source: 'deterministik',
-      title: `Dokunma hedefi küçük: ${e.label || e.class}`,
-      detail: `${e.bounds.x2 - e.bounds.x1}×${e.bounds.y2 - e.bounds.y1} px < ${minPx} px (${MIN_TOUCH_DP} dp). Parmakla isabet zorlaşır.`,
-      location: `${e.center.x},${e.center.y}`,
-    }));
-}
 
 function describeElements(node) {
   return (node.interactives || []).slice(0, 40).map((e) =>
@@ -113,7 +97,6 @@ export async function judge({ mapDir, out, model = DEFAULT_MODEL, effort = 'medi
   const graphPath = join(mapDir, 'graph.json');
   if (!existsSync(graphPath)) throw new Error(`graph.json yok: ${graphPath} (önce: testful map)`);
   const graph = JSON.parse(readFileSync(graphPath, 'utf8'));
-  const density = graph.device?.density || null;
 
   if (!client) {
     if (!process.env.ANTHROPIC_API_KEY && !process.env.ANTHROPIC_AUTH_TOKEN) {
@@ -128,13 +111,12 @@ export async function judge({ mapDir, out, model = DEFAULT_MODEL, effort = 'medi
   const usage = { input_tokens: 0, output_tokens: 0 };
   for (const node of nodes.slice(0, maxScreens)) {
     const pngPath = join(mapDir, node.screenshot);
-    const deterministic = touchTargetFindings(node, density);
-    if (!existsSync(pngPath)) { screens.push({ sig: node.sig, order: node.order, findings: deterministic, error: 'ekran görüntüsü yok' }); continue; }
+    if (!existsSync(pngPath)) { screens.push({ sig: node.sig, order: node.order, findings: [], error: 'ekran görüntüsü yok' }); continue; }
     qlog(`[JUDGE] ekran ${node.order} (${node.sig})`);
     const r = await judgeScreen({ client, model, effort, png: readFileSync(pngPath), node });
     if (r.usage) { usage.input_tokens += r.usage.input_tokens; usage.output_tokens += r.usage.output_tokens; }
     if (r.error) qlog(`  [UYARI] ${r.error}`);
-    screens.push({ sig: node.sig, order: node.order, summary: r.summary || null, findings: [...deterministic, ...(r.findings || [])], error: r.error || null });
+    screens.push({ sig: node.sig, order: node.order, summary: r.summary || null, findings: r.findings || [], error: r.error || null });
   }
   const skipped = Math.max(0, nodes.length - maxScreens);
   const result = { model, effort, judged: screens.length, skipped, usage, screens };

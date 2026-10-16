@@ -22,7 +22,7 @@ concurrency:
 jobs:
   testful:
     uses: mehmetyasinuzun/Testful/.github/workflows/testful.yml@main
-    # Repo Secrets'ı (varsa) aktarır: TESTFUL_LOGIN_USER / _PASSWORD / _OTP / _PHONE,
+    # Repo Secrets'ı (varsa) aktarır: MAESTRO_EMAIL / _PASSWORD / _OTP / _PHONE,
     # SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY, ANTHROPIC_API_KEY, GCP_CREDENTIALS_JSON.
     # Hiçbiri zorunlu değil; olmayan özellik sessizce atlanır.
     secrets: inherit

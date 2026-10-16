@@ -92,17 +92,21 @@ jobs:
           if (!Object.values(g.nodes).some((n) => n.interactives.some((e) => e.a11y_missing))) fail('etiketsiz ikon buton a11y bulgusu olarak yakalanmadı');
 
           // Senaryolar: kesin hata yok; ortam kaynaklı flaky Testful'un karantinasıyla raporlanır
-          if (r.totals.failed !== 0) fail(`senaryo kaldı: ${JSON.stringify(r.totals)}`);
+          if (r.totals.failed !== 0) fail(`senaryo kaldı: ${JSON.stringify(r.scenarios.map((s) => [s.id, s.result, s.reason]))}`);
+          if (r.totals.env_error) fail(`senaryolarda ortam hatası: ${r.env_error || JSON.stringify(r.totals)}`);
           if (r.totals.passed + r.totals.flaky !== 2) fail(`DEMO-01/02 koşmalı: ${JSON.stringify(r.totals)}`);
           if (r.totals.flaky) console.log(`::warning::flaky senaryo: ${JSON.stringify(r.totals)} (karantina — kırmızı değil)`);
 
           // Kanıt: video, ekran görüntüsü, kesintisiz logcat
-          const shots = fs.existsSync(`${OUT}/run/screenshots`) ? fs.readdirSync(`${OUT}/run/screenshots`) : [];
+          const shotDir = `${OUT}/run/screenshots/normal`;
+          const shots = fs.existsSync(shotDir) ? fs.readdirSync(shotDir) : [];
           if (!shots.some((f) => f.startsWith('DEMO-01'))) fail(`senaryo ekran görüntüleri toplanmadı: ${shots}`);
           const vids = fs.existsSync(`${OUT}/video`) ? fs.readdirSync(`${OUT}/video`) : [];
           for (const v of ['1-kesif.mp4', '2-senaryolar.mp4', '3-kaos.mp4']) {
             if (!vids.includes(v) || fs.statSync(`${OUT}/video/${v}`).size < 10000) fail(`video eksik/boş: ${v} (bulunan: ${vids})`);
           }
+          const smoke = JSON.parse(fs.readFileSync(`${OUT}/smoke/report.json`, 'utf8'));
+          if (smoke.kind !== 'smoke' || smoke.metrics['soğuk açılış (ms)'] == null) fail(`smoke raporu eksik: ${JSON.stringify(smoke.metrics)}`);
           const logcat = fs.readFileSync(`${OUT}/logcat.txt`, 'utf8');
           if (!logcat.includes('dev.testful.demo')) fail('kesintisiz logcat uygulama satırı içermiyor');
 

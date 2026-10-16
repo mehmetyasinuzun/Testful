@@ -1,58 +1,60 @@
 # Rapor Formatı ve Artefaktlar
 
 ## Koşu klasörü
-`scripts/new-run.sh` üretir: `.qa/results/<run-id>/` (run-id: `YYYYMMDD-HHMMSS`)
+`testful run` / `testful smoke` üretir: `.qa/results/<run-id>/` (run-id: `YYYYMMDD-HHMMSS`)
 
 ```
-.qa/results/20260615-142233/
-├── report.md        insan için (Türkçe)
-├── report.json      makine için (run-diff bunun üstünden çalışır)
-├── screenshots/     <senaryoID>-<adımNo>-<slug>.png
-├── logcat/          monkey.txt, <senaryoID>.txt
-└── flows/           koşulan flow kopyaları (yeniden üretilebilirlik)
+.qa/results/20261016-142233/
+├── report.md            insan için (Türkçe) — karar, sıradaki adımlar, bulgular, fark
+├── report.json          makine için (schema: testful/report@1)
+├── run.json             ham ölçüm girdisi (testful report bunu yeniden işler)
+├── findings.extra.json  (opsiyonel) AI/vision bulguları — sen yazarsın
+├── logs/<ID>-<n>.txt    Maestro çıktısı (deneme başına)
+├── logcat/<ID>-<n>.txt  yalnız başarısız/şüpheli denemelerin logcat'i
+├── debug/<ID>-<n>/      Maestro debug çıktısı (hata anı ekran görüntüleri)
+└── screenshots/<durum>/ flow'ların takeScreenshot çıktıları (normal, dark, ...)
 ```
+smoke ek olarak: `launch.png/.xml`, `launch-logcat.txt`, `monkey.txt`, `monkey-logcat.txt`.
 
-`.qa/results/` ve `.qa/config.local.yaml` gitignore'a girer;
-`.qa/scenarios/` commit'lenir.
+## Karar (status) ve çıkış kodu
+| status | ship_ready | exit | anlamı |
+|---|---|---|---|
+| `ready` | true | 0 | engelleyici bulgu yok |
+| `not-ready` | false | 1 | kritik bulgu ya da kesin+yüksek bulgu var |
+| `inconclusive` | false | 3 | ortam hatası (cihaz koptu, disk dolu, Maestro sürücüsü) — UYGULAMA HATASI DEĞİL |
 
-## report.json şeması
+Engelleyici = `kritik` (flaky değilse) ya da `yüksek` + `kesin`. Flaky asla engellemez.
+
+## report.json (özet)
 ```json
 {
-  "run_id": "20260615-142233",
-  "app": {"package": "com.example.app", "framework": "flutter", "version": "1.2.0"},
-  "tier": "core",
-  "device": {"id": "emulator-5554", "android": "14", "kind": "emulator"},
-  "driver": "patrol",
-  "totals": {"passed": 9, "failed": 2, "flaky": 1, "blocked": 0},
-  "scenarios": [
-    {
-      "id": "MAP-01",
-      "title": "Yer ara ve rota çiz",
-      "result": "fail",
-      "retries": 2,
-      "confidence": "kesin",
-      "steps": [
-        {"n": 1, "do": "launch", "expect": "...", "ok": true,
-         "shot": "screenshots/MAP-01-1-launch.png"}
-      ],
-      "finding": {
-        "severity": "yüksek",
-        "title": "Rota çizgisi hiç görünmüyor",
-        "repro": ["uygulamayı aç", "Kadıköy ara", "Yol tarifi'ne bas"],
-        "evidence": ["screenshots/MAP-01-5-rota.png", "logcat/MAP-01.txt"],
-        "suspected_cause": {"file": "lib/map/route_layer.dart", "line": 120,
-                            "note": "polyline listesi boş dönüyor"},
-        "suggested_fix": "route response parse'ında ... ",
-        "status": "open"
-      }
-    }
-  ]
+  "schema": "testful/report@1", "run_id": "...", "kind": "run|smoke",
+  "status": "not-ready", "ship_ready": false,
+  "app": {"package": "com.x", "framework": "flutter"},
+  "device": {"serial": "emulator-5554", "model": "...", "android": "15"},
+  "totals": {"scenarios": 7, "passed": 5, "failed": 1, "flaky": 1, "env_error": 0, "findings": 3},
+  "blocking": ["F-01"],
+  "scenarios": [{"id": "NAV-ab12@dark", "flow": "NAV-ab12.flow.yaml", "state": "dark",
+                 "result": "fail", "confidence": "kesin", "attempts": 3, "passes": 0,
+                 "reason": "Assert that \"Kaydet\" is visible... FAILED",
+                 "crash": {"type": "crash", "stack": ["..."]}, "logs": ["logs/..."], "screenshots": []}],
+  "findings": [{"id": "F-01", "type": "crash|anr|scenario-fail|a11y|performance|vision|...",
+                "severity": "kritik", "confidence": "kesin", "title": "...", "detail": "...",
+                "source": "scenario:NAV-ab12", "evidence": ["logcat/..."], "key": "kararlı-anahtar"}],
+  "diff": {"previous_run": "...", "new": [], "resolved": [], "persisting": []},
+  "next_actions": ["Düzelt: ..."]
 }
 ```
+`--json` bayrağı stdout'a bunun kompakt hâlini basar (loglar stderr'e gider).
 
-`finding.status`: `open | fixed | fix-regressed | blocked`.
-`finding.severity` tipleri arasında `testability` bulguları da olabilir
-(eksik Key/Semantics — düzeltmesi testability patch'tir).
+## AI/vision bulgularını eklemek
+Koşu klasörüne `findings.extra.json` yaz, sonra `testful report <run_dir>`:
+```json
+{"findings": [{"type": "vision", "severity": "orta", "confidence": "muhtemel",
+  "title": "Kaydet butonu klavyenin altında kalıyor", "detail": "...",
+  "evidence": ["screenshots/normal/NAV-ab12-1.png"], "status": "open"}]}
+```
+`status`: `open | fixed | fix-regressed | blocked` (`fixed` engellemez).
 
 ## Önem tanımları
 - **kritik** — çökme/ANR ya da ana akışı bitiren engel
@@ -65,11 +67,6 @@
 - **muhtemel** — kanıt güçlü ama tek koşu ya da yalnız vision yorumu
 - **flaky-şüphesi** — karışık sonuç; karantinaya alınır, fix loop'a girmez
 
-## report.md yapısı (Türkçe)
-1. **Özet** — aktif tier, geçen/kalan, net karar: "piyasaya hazır mı?"
-   (hazır / şu engellerle hazır değil)
-2. **Bulgular** — önem sırasıyla: ID · başlık · önem · güven · repro ·
-   ekran görüntüsü · şüpheli kök-neden (dosya:satır) · önerilen düzeltme
-3. **Flaky karantinası** — ayrı başlık, fix önerisi YOK
-4. **Önceki koşuya fark** — yeni / çözülen / devam eden (report.json diff)
-5. **Kapsam dışı** — bütçe nedeniyle kesilen senaryolar
+## Fark (run-diff)
+Her koşu aynı `.qa/results/` altındaki bir önceki aynı türden koşuyla bulgu
+anahtarları (`key`) üzerinden karşılaştırılır: yeni / çözülen / devam eden.

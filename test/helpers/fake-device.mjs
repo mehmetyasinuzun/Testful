@@ -51,6 +51,12 @@ export function fakeDevice(app, { log = false } = {}) {
   const dev = {
     state,
     requireDevice: () => 'fake-5554',
+    isInstalled: () => true,
+    clearLogcat: () => {},
+    dumpLogcat: () => '',
+    stabilize: () => () => {},
+    collapseShade: () => {},
+    reverse: () => {},
     dumpTree: () => xml(),
     screenshot: () => Buffer.from('PNG'),
     sleepOnDevice: () => {},

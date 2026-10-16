@@ -8,8 +8,8 @@
 //   Aynı e-postayla gerçek bir kullanıcı varsa şifresini DEĞİŞTİRMEZ, hata verir.
 // - Önerilen: testleri ayrı bir staging Supabase projesine karşı koşmak.
 //
-// env: SUPABASE_URL SUPABASE_SERVICE_ROLE_KEY TESTFUL_LOGIN_USER TESTFUL_LOGIN_PASSWORD
-//      [TESTFUL_LOGIN_PHONE]
+// env: SUPABASE_URL SUPABASE_SERVICE_ROLE_KEY MAESTRO_EMAIL MAESTRO_PASSWORD
+//      [MAESTRO_PHONE]
 // İstemci: resmi supabase-js'in GoTrueAdminApi'si ile aynı REST uçları.
 
 import { pathToFileURL } from 'node:url';
@@ -72,11 +72,11 @@ export async function ensureTestUser({ url, key, email, password, phone, fetchIm
 
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isMain) {
-  const { SUPABASE_URL: url, SUPABASE_SERVICE_ROLE_KEY: key, TESTFUL_LOGIN_USER: email, TESTFUL_LOGIN_PASSWORD: password, TESTFUL_LOGIN_PHONE: phone } = process.env;
+  const { SUPABASE_URL: url, SUPABASE_SERVICE_ROLE_KEY: key, MAESTRO_EMAIL: email, MAESTRO_PASSWORD: password, MAESTRO_PHONE: phone } = process.env;
   if (!url || !key) {
     console.log('SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY yok — test kullanıcısı adımı atlanıyor');
   } else if (!email || !password) {
-    console.log('::warning::Supabase anahtarları var ama TESTFUL_LOGIN_USER / TESTFUL_LOGIN_PASSWORD yok — test kullanıcısı hazırlanmadı');
+    console.log('::warning::Supabase anahtarları var ama MAESTRO_EMAIL / MAESTRO_PASSWORD yok — test kullanıcısı hazırlanmadı');
   } else {
     try {
       const r = await ensureTestUser({ url, key, email, password, phone });

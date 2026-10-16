@@ -8,7 +8,9 @@
 import { readdirSync, readFileSync, existsSync, writeFileSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { crashHits, HARD_KINDS } from '../cli/lib/crash.mjs';
+import { scanLogcat } from '../cli/lib/logcat.mjs';
+
+const HARD = new Set(['crash', 'anr', 'oom']);
 
 const mean = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
 const stdev = (a) => { const m = mean(a); return a.length > 1 ? Math.sqrt(mean(a.map((x) => (x - m) ** 2))) : 0; };
@@ -24,7 +26,7 @@ export function collect(dir) {
     const steps = Object.fromEntries((existsSync(join(d, 'steps.env')) ? readFileSync(join(d, 'steps.env'), 'utf8') : '')
       .split('\n').filter(Boolean).map((l) => l.split('=')));
     const log = existsSync(join(d, 'logcat.txt')) ? readFileSync(join(d, 'logcat.txt'), 'utf8') : '';
-    const hits = meta.package ? crashHits(log, meta.package, 'koşu') : [];
+    const hits = meta.package ? scanLogcat(log, { pkg: meta.package }).hits : [];
     const sigs = graph ? Object.keys(graph.nodes) : [];
     runs.push({
       ...meta,
@@ -33,7 +35,7 @@ export function collect(dir) {
       coverage: graph?.stats.coverage_pct ?? 0,
       actions: graph?.stats.actions ?? 0,
       unlabeled: graph ? Object.values(graph.nodes).flatMap((n) => n.interactives).filter((e) => e.a11y_missing).length : 0,
-      crashes: hits.filter((h) => HARD_KINDS.has(h.kind)).length,
+      crashes: hits.filter((h) => HARD.has(h.type)).length,
       sigs,
     });
   }
