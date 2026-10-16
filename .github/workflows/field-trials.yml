@@ -1,0 +1,93 @@
+# Saha denemeleri: Testful'u gerçek açık kaynak uygulamalarda (F-Droid) tekrar tekrar
+# koşar ve kararlılığını ölçer (ROADMAP KAPI-2). Haftalık + elle tetiklenir.
+# Sonuç: iş özetinde uygulama başına ortalama ± sapma tablosu + field-trials.json.
+name: Testful field trials
+
+on:
+  schedule:
+    - cron: '17 3 * * 1'   # her pazartesi 03:17 UTC
+  workflow_dispatch:
+    inputs:
+      repeats:
+        description: Uygulama başına tekrar sayısı
+        default: '3'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: field-trials
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      runs: ${{ steps.m.outputs.runs }}
+    steps:
+      - id: m
+        env:
+          REPEATS: ${{ inputs.repeats || '3' }}
+        run: echo "runs=$(seq -s, 1 "$REPEATS" | sed 's/^/[/; s/$/]/')" >> "$GITHUB_OUTPUT"
+
+  trial:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix:
+        # Seçim ölçütü: popüler, ağsız çalışır, x86_64 uyumlu (yerel kütüphanesiz ya da evrensel APK)
+        app:
+          - { name: fossify-notes, package: org.fossify.notes }
+          - { name: catima, package: me.hackerchick.catima }
+          - { name: opentracks, package: de.dennisguse.opentracks }
+        run: ${{ fromJSON(needs.plan.outputs.runs) }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: APK'yı F-Droid'den indir (önerilen sürüm)
+        id: apk
+        env:
+          PKG: ${{ matrix.app.package }}
+        run: |
+          mkdir -p trial
+          v="$(curl -fsSL "https://f-droid.org/api/v1/packages/$PKG" | jq -r .suggestedVersionCode)"
+          curl -fsSL -o trial/app.apk "https://f-droid.org/repo/${PKG}_${v}.apk"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - name: Deneme meta verisi (rapor klasörüne, action'ın yüklemesine dahil olur)
+        run: |
+          mkdir -p "$RUNNER_TEMP/testful-out"
+          printf '{"app":"%s","package":"%s","version":"%s","run":%s}\n' \
+            "${{ matrix.app.name }}" "${{ matrix.app.package }}" "${{ steps.apk.outputs.version }}" "${{ matrix.run }}" \
+            > "$RUNNER_TEMP/testful-out/trial.json"
+      - id: testful
+        uses: ./
+        with:
+          working-directory: trial
+          apk-path: app.apk
+          package: ${{ matrix.app.package }}
+          fail-on: never
+          pr-comment: 'false'
+          record-video: 'false'
+          max-minutes: '6'
+          monkey-events: '500'
+          visual-judge: 'false'
+          artifact-name: trial-${{ matrix.app.name }}-${{ matrix.run }}
+
+  report:
+    needs: trial
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: trial-*
+          path: trials
+      - run: node ci/field-trials-report.mjs trials
+      - uses: actions/upload-artifact@v4
+        with:
+          name: field-trials
+          path: field-trials.json
+          retention-days: 90

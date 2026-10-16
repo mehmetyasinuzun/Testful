@@ -7,7 +7,7 @@
     "testful": "cli/testful.mjs"
   },
   "scripts": {
-    "test": "node --test test/map.test.mjs test/units.test.mjs test/judge.test.mjs test/supabase.test.mjs test/firebase.test.mjs",
+    "test": "node --test test/map.test.mjs test/units.test.mjs test/judge.test.mjs test/supabase.test.mjs test/firebase.test.mjs test/field-trials.test.mjs",
     "doctor": "node cli/testful.mjs doctor",
     "setup": "node cli/testful.mjs setup"
   },

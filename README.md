@@ -11,7 +11,10 @@ kodun makinenden çıkmaz, koşucu katman tamamen deterministiktir.
 > Durum: **Alpha (Faz 1 kanıtlandı).** Boru hattı gerçek bir emülatörde, gerçek
 > bir Flutter uygulamasında (Flutter ekibinin resmî `compass_app` örneği) uçtan
 > uca doğrulandı: 6 senaryo, seed'li kaos taraması, 43 bulguluk vision paneli ve
-> 5 bulgunun kaynak kodda düzeltilip yeniden yeşil koşması dahil. Henüz "canlı"
+> 5 bulgunun kaynak kodda düzeltilip yeniden yeşil koşması dahil. v0.3 ile
+> GitHub Actions'ta bulut emülatöründe koşar (bilgisayarsız), keşif kaydırır ve
+> giriş duvarını geçer, çekirdek Linux/macOS/Windows'ta test edilir ve gerçek
+> açık kaynak uygulamalarda haftalık saha denemesiyle ölçülür. Henüz "canlı"
 > ürün değil — dürüst durum tablosu aşağıda.
 
 ---
@@ -50,7 +53,7 @@ APK (± kaynak kod)
 
 | Gereksinim | Detay |
 |---|---|
-| İşletim sistemi | **Windows 10+ doğrulandı.** macOS/Linux teoride çalışır (bash + node + adb taşınabilir) ama henüz test edilmedi. iOS testi kapsam dışı (macOS ister). |
+| İşletim sistemi | **Windows 10+** yerelde uçtan uca doğrulandı. **Linux** emülatörlü uçtan uca CI'da her push'ta doğrulanır. **macOS** ve Windows'ta çekirdek birim testleri CI'da koşar; macOS'ta yerel emülatörle uçtan uca henüz denenmedi. iOS kapsam dışı. |
 | RAM | **16 GB önerilir** (emülatör ~2-4 GB + Gradle derlemesi ağır). |
 | Disk | **≥ 10 GB boş** (doctor 8 GB altında uyarır). Sistem imajı ~1,5 GB + AVD ~4 GB + Gradle cache. |
 | Java | 17+ (Maestro için) |
@@ -58,7 +61,7 @@ APK (± kaynak kod)
 | Node.js | 18+ (crawler + rapor üreteci) |
 | Maestro | CLI ([kurulum](https://docs.maestro.dev/maestro-cli/how-to-install-maestro-cli); Windows'ta native çalışıyor — GitHub release zip + PATH) |
 | Flutter + Patrol | Yalnız Flutter hedefleri ve derin mod için |
-| **API anahtarı** | **HAYIR — bugün gerekmiyor.** AI kabuğu Claude Code oturumudur (aboneliğin). Çekirdek zaten AI'sızdır. |
+| **API anahtarı** | **Zorunlu değil.** AI kabuğu Claude Code oturumudur (aboneliğin); çekirdek AI'sızdır. Yalnız CI'da otomatik görsel hakem istersen `ANTHROPIC_API_KEY` (BYOK). |
 | **Docker** | **HAYIR.** İzolasyon AVD snapshot ile ("temiz" snapshot = Android'in Docker'ı). Linux CI için Docker Faz 3'te. |
 
 ## Hızlı Başlangıç
@@ -91,6 +94,8 @@ cp -r .claude/skills/mobile-ux-test  <senin-projen>/.claude/skills/
 Senaryolar bir kez yazıldıktan sonra (elle ya da bir AI oturumunda ürettirip
 commit'leyerek) her şey terminalden, sıfır token'la koşar:
 ```bash
+node cli/testful.mjs map --pkg <paket>         # otonom keşif → .qa/map/graph.json
+node cli/testful.mjs judge --map .qa/map       # görsel hakem (ANTHROPIC_API_KEY) → judge.json
 node cli/testful.mjs observe --pkg <paket>     # ekran paketi: ağaç+png+selectors.json
                                                # (seçiciler GERÇEK ağaçtan: sekme→regex,
                                                #  etiketsiz alan→koordinat+a11y bulgusu)
@@ -141,10 +146,13 @@ kaybettiğin şey: otomatik senaryo üretimi, görsel hakemlik ve otomatik düze
 Kazandığın: CI'da sıfır maliyetli, deterministik regresyon koşuları.
 
 **Uygulamam login istiyor / OTP var — takılır mı?**
-Test hesabını gitignore'lu `.qa/config.local.yaml`'a koyarsın; ajan girer.
-Aşamayacağı duvar (OTP/captcha/ödeme) = **blocker protokolü**: durur, ekranı
-gösterir, sana sorar, cevabınla devam eder. Duvar "başarısızlık" değil
-"devam noktası"dır.
+Test hesabını `TESTFUL_LOGIN_USER` / `_PASSWORD` (gerekirse `_OTP`, `_PHONE`)
+ortam değişkenlerine ver (CI'da GitHub Secrets; yerelde gitignore'lu
+`.qa/config.local.yaml`). Keşif giriş/OTP formunu tanır, doldurur ve gönderir;
+şifre log ve artifact'larda maskelenir. Supabase kullanıyorsan test kullanıcısı
+koşudan önce otomatik hazırlanır ([docs/CI.md](docs/CI.md#supabase-kullanan-uygulamalar)).
+Aşamayacağı duvar (CAPTCHA, e-posta magic link, ödeme) = **blocker protokolü**:
+durur, ekranı gösterir, sana sorar, cevabınla devam eder.
 
 **Hangi çerçeveler?** Flutter (Patrol derin mod + vision), Kotlin/Java native
 ve React Native/Expo (Maestro). Vision katmanı çerçeve-bağımsızdır; en zor hedef
@@ -186,8 +194,8 @@ kilitlenme yok. Örnek: [examples/scenario-pair/](examples/scenario-pair/).
 | 0 — Ortam | skill + script'ler + Maestro/Patrol + AVD "temiz" snapshot + doctor | ✅ |
 | 1 — İlk kanıt | gerçek uygulamada uçtan uca: senaryolar, kaos, 43 bulguluk vision paneli, fix-loop (5 bulgu düzeltildi, smoke yeşil) | ✅ |
 | 1.5 — Explorer | AI'sız keşif crawler'ı + graph.json + günlük log sistemi | ✅ v0 |
-| 2 — Motor | `testful` CLI (TypeScript): run/doctor/report/judge tek komutta; Maestro'suz sürüş (adb-direct); durum matrisi (karanlık/font 1.3×/döndürme/offline); harita render (mermaid) | ⬜ sıradaki |
-| 3 — Ürünleşme | **çoklu AI sağlayıcı (BYOK: DeepSeek/OpenAI/Claude API ile `judge`)** · MCP server (Cursor vb. istemciler) · görsel regresyon (baseline diff) · run-diff (yeni/çözülen/devam eden) · interaktif HTML harita · Linux CI (Docker) | ⬜ |
+| 2 — Motor | `testful` CLI: observe/map/run/judge/doctor/setup/ci-init ✅ · model tabanlı keşif (kaydırma, giriş/OTP, gezinme) ✅ · durum matrisi ✅ · mermaid harita (CI özeti) ✅ · çapraz platform + 34 birim test ✅ · Maestro'suz sürüş (adb-direct) ⬜ | 🔄 |
+| 3 — Ürünleşme | Linux CI: GitHub Actions bulut emülatörü + video + PR yorumu ✅ · `judge` (Claude, BYOK) ✅ · Supabase test kullanıcısı ✅ · Firebase Test Lab (2027'ye dek) ✅ · diğer AI sağlayıcıları · MCP server · görsel regresyon · run-diff · interaktif HTML harita ⬜ | 🔄 |
 | 4 — Yayılım | çoklu-uygulama stabilite kanıtı (2-3 uygulama × 10 koşu, flakiness ölçümü) · EN dokümantasyon · npm paketi · iOS (macOS) | ⬜ |
 
 ## Saha Dersleri (kanla yazıldı 🩸)

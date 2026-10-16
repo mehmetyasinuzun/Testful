@@ -55,9 +55,17 @@ observe-first**: her ekranın GERÇEK a11y ağacından çıkarılır; kaynak ak�
       4 geçiş, ~%45 kapsama (onboarding isim-kapısında durdu — doğru davranış).
 - [x] v0.2 `setup` ✅: yerel AVD'yi imajdan kurar (indirmesiz); `package.json`
       bin=testful (npm link → global `testful`); tek-komut `doctor`
+- [x] v0.3 CI + motor (2026-10-16): GitHub Actions bulut emülatörü (reusable
+      workflow, video, PR yorumu, APK artifact); model tabanlı keşif (kaydırma,
+      giriş/OTP formu, BFS gezinme, süre sınırı — eski motorun kör geri/yeniden
+      başlat döngüsü kaldırıldı); platform katmanı (Win/macOS/Linux) + 34 birim
+      test 3 OS'ta; `judge` (Claude, JSON şemalı, dokunma hedefi AI'sız);
+      Supabase test kullanıcısı; Firebase Test Lab (30.09.2027'ye dek)
 - [ ] v0.3 `author`: selectors.json + kaynak haritası → senaryo iskeleti
       (AI'ya hazır paket; Sonnet rutini için biçilmiş görev) ← SIRADAKİ
-- [ ] **KAPI-2:** 2 uygulama × 10 koşu flakiness ölçümü
+- [ ] **KAPI-2:** 2 uygulama × 10 koşu flakiness ölçümü — altyapı hazır:
+      `field-trials.yml` (F-Droid: Fossify Notes, Catima, OpenTracks × N tekrar,
+      haftalık); kapı, ilk sonuçlar değerlendirilince işaretlenecek
 - [ ] v0.4 run portu: Maestro'suz adb-direct sürüş + env-fail ≠ senaryo-fail
       ayrımı + koşu-başı otomatik sağlık kontrolü
 - [ ] Durum matrisi otomasyonu: karanlık · font 1.3× · döndürme · offline
