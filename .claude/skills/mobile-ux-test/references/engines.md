@@ -43,12 +43,14 @@ context7 ile doğrula (Patrol: leancode.co docs, Maestro: maestro.dev).
   Maestro tam-eşleşme yaptığından alt-metin seçicisi tutmaz — `[\s\S]*` sonekiyle yaz:
   `tapOn: 'Alaska, North America[\s\S]*'` (YAML'da TEK tırnak — çift tırnakta `\s`
   geçersiz escape'tir). Doğrulama aracı: `adb exec-out uiautomator dump /dev/tty`.
-- **Windows saha dersleri:** (1) `launchApp`'e `stopApp: false` ekle — Maestro'nun
-  dadb force-stop'u arada "device offline" verir; akışta zaten `clearState` varsa
-  force-stop gereksizdir. (2) `adb reverse` kuralları Maestro'nun adb server
+- **Saha dersleri (Windows'ta bulundu, Linux CI'da da doğrulandı):** (1) `launchApp`'e
+  `stopApp: false` ekle — akışta zaten `clearState` varsa force-stop gereksizdir ve
+  zararlıdır: Windows'ta dadb arada "device offline" verir; Linux CI'da yeni başlatılan
+  süreç ~50 ms sonra "Killing … remove task" ile öldürülüp ekran 30 sn boş kaldı
+  (kesintisiz logcat ile kanıtlandı, 2026-10-16). (2) `adb reverse` kuralları Maestro'nun adb server
   resetlerinde SİLİNİR — her akıştan hemen önce idempotent yeniden uygula.
-  (3) İlk `maestro test` çağrısı transport ısınması nedeniyle patlayabilir — bir
-  kez tekrarla. (4) Emülatör/sunucu gibi uzun ömürlü süreçler oturumla birlikte
+  (3) İlk `maestro test` çağrısı sürücü kurulumu/transport ısınması nedeniyle
+  patlayabilir — `testful run` artık puanlanmayan bir ısınma akışı koşar. (4) Emülatör/sunucu gibi uzun ömürlü süreçler oturumla birlikte
   ölebilir — koşu başında cihaz + backend sağlığını doğrula, gerekirse snapshot'tan
   geri getir (snapshot uygulama KURULUMUNDAN öncesiyse APK'yı yeniden kur).
 - **Backend köprüsü — `10.0.2.2` > `adb reverse` (saha dersi):** Uygulama yerel

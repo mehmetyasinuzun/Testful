@@ -155,6 +155,17 @@ export async function runSuite({ appDir, glob = '*', matrix = [] }) {
     }
   };
 
+  // Isınma (puanlanmaz): ilk `maestro test` cihaza sürücü uygulamasını kurar ve
+  // başlatır; bu, ilk senaryonun içinde olursa onu boş ekranla düşürebiliyor
+  // (saha dersi: references/engines.md). Sonuç yok sayılır.
+  const firstPkg = (readFileSync(join(scenariosDir, matchingFiles[0]), 'utf8').match(/^appId:\s*(.+)$/m) || [])[1]?.trim();
+  if (firstPkg) {
+    const warm = join(runDir, '_warmup.flow.yaml');
+    writeFileSync(warm, `appId: ${firstPkg}\n---\n- pressKey: Home\n`);
+    qlog('[WARMUP] Maestro sürücüsü ısıtılıyor (puanlanmaz)');
+    executeFlow(warm, join(logcatDir, '_warmup.txt'));
+  }
+
   // Run base scenarios
   await runAllScenarios('');
 

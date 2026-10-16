@@ -4,9 +4,13 @@
 name: Testful self-test
 
 on:
+  # main'e push + PR'lar. Dal push'ları ayrıca tetiklemez: PR'ı olan dalda aynı
+  # emülatör testi iki kez (push + pull_request) koşuyordu.
   push:
+    branches: [main]
     paths-ignore: ['**.md']
   pull_request:
+    paths-ignore: ['**.md']
   workflow_dispatch:
 
 permissions:
