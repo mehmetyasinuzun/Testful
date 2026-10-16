@@ -50,6 +50,12 @@ rec_stop() {
   done
   wait "$REC_PID" 2>/dev/null
   REC_PID=""
+  # SIGINT sonrası screenrecord mp4'ü kapatırken (moov başlığı) dosyayı çekersek parça
+  # bozuk olur ve birleştirme başarısız olur: süreç cihazda gerçekten bitene kadar bekle.
+  for _ in $(seq 1 20); do
+    [ -z "$(adb shell pidof screenrecord 2>/dev/null | tr -d '\r')" ] && break
+    sleep 0.5
+  done
   sleep 1
   mkdir -p "$OUT/video/parts"
   adb pull "$REC_DIR/." "$OUT/video/parts/" >/dev/null 2>&1 || true
@@ -64,8 +70,13 @@ rec_merge() {
       mv "${segs[0]}" "$OUT/video/$name.mp4"
     elif command -v ffmpeg >/dev/null 2>&1 || { sudo apt-get install -y -qq ffmpeg >/dev/null 2>&1 && command -v ffmpeg >/dev/null; }; then
       printf "file '%s'\n" "${segs[@]}" > "$parts/$name.txt"
-      if ffmpeg -loglevel error -f concat -safe 0 -i "$parts/$name.txt" -c copy "$OUT/video/$name.mp4"; then
+      if ffmpeg -loglevel error -y -f concat -safe 0 -i "$parts/$name.txt" -c copy "$OUT/video/$name.mp4" 2>>"$OUT/video/merge.log"; then
         rm -f "${segs[@]}"
+      else
+        # Birleştirme başarısız: kayıt kaybolmasın, parçalar sırayla kalır
+        echo "::warning::$name videosu birleştirilemedi; parçalar ayrı yüklendi (video/merge.log)"
+        rm -f "$OUT/video/$name.mp4"
+        mv "${segs[@]}" "$OUT/video/"
       fi
     else
       mv "${segs[@]}" "$OUT/video/"   # ffmpeg yoksa parçalar sırayla kalır

@@ -102,8 +102,12 @@ jobs:
           const shots = fs.existsSync(shotDir) ? fs.readdirSync(shotDir) : [];
           if (!shots.some((f) => f.startsWith('DEMO-01'))) fail(`senaryo ekran görüntüleri toplanmadı: ${shots}`);
           const vids = fs.existsSync(`${OUT}/video`) ? fs.readdirSync(`${OUT}/video`) : [];
-          for (const v of ['1-kesif.mp4', '2-senaryolar.mp4', '3-kaos.mp4']) {
-            if (!vids.includes(v) || fs.statSync(`${OUT}/video/${v}`).size < 10000) fail(`video eksik/boş: ${v} (bulunan: ${vids})`);
+          for (const phase of ['1-kesif', '2-senaryolar', '3-kaos']) {
+            // birleşik (1-kesif.mp4) ya da birleştirilemezse parçalar (1-kesif-01.mp4…)
+            const files = vids.filter((v) => v === `${phase}.mp4` || v.startsWith(`${phase}-`));
+            const size = files.reduce((n, v) => n + fs.statSync(`${OUT}/video/${v}`).size, 0);
+            if (size < 10000) fail(`video eksik/boş: ${phase} (bulunan: ${vids})`);
+            if (!files.includes(`${phase}.mp4`) && files.length) console.log(`::warning::${phase} videosu parça parça (birleştirme: video/merge.log)`);
           }
           const smoke = JSON.parse(fs.readFileSync(`${OUT}/smoke/report.json`, 'utf8'));
           if (smoke.kind !== 'smoke' || smoke.metrics['kaos olayı'] !== 500) fail(`smoke koşmadı: ${JSON.stringify(smoke.metrics)}`);
