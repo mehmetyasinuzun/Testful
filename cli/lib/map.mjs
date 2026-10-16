@@ -95,13 +95,15 @@ export async function map({ pkg, out, maxActions = 80, maxMinutes = 10, clear = 
   };
   const hasWork = (sig) => candidates(sig).length > 0 && !unreachable.has(sig);
 
+  /** Ekranı kaydet ya da (kaydırmayla görünen) yeni öğeleri ekle; eklenen öğe sayısını döndürür. */
   const register = (sig, xml, els) => {
     const n = graph.nodes[sig];
     if (n) {
       const known = new Set(n.interactives.map(elementKey));
-      for (const e of els) if (!known.has(elementKey(e))) n.interactives.push(e);
+      const added = els.filter((e) => !known.has(elementKey(e)));
+      n.interactives.push(...added);
       n.total = n.interactives.filter((e) => e.kind !== 'field').length;
-      return;
+      return added.length;
     }
     writeFileSync(join(screensDir, `${sig}.png`), screenshot());
     writeFileSync(join(screensDir, `${sig}.xml`), xml);
@@ -117,6 +119,7 @@ export async function map({ pkg, out, maxActions = 80, maxMinutes = 10, clear = 
     tried[sig] = new Set();
     typedOn[sig] = [];
     qlog(`[EKRAN ${graph.nodes[sig].order}] ${sig} — ${els.filter((e) => e.label).slice(0, 4).map((e) => e.label).join(' · ') || '(etiketsiz)'}`);
+    return els.length;
   };
 
   /** Ekranı oku → { sig (asıl), raw, nodes, els (canlı) } ya da sig:null. */
@@ -233,7 +236,7 @@ export async function map({ pkg, out, maxActions = 80, maxMinutes = 10, clear = 
   graph.start = cur.sig;
 
   let stop = 'eylem bütçesi doldu';
-  let lastNewAt = 0;
+  let lastNewAt = 0; // son ilerleme (yeni ekran ya da kaydırmayla yeni öğe) anındaki dokunuş sayısı
   let screenCount = 1;
   let scrollsThisVisit = 0;
   let lastSig = null;
@@ -317,7 +320,9 @@ export async function map({ pkg, out, maxActions = 80, maxMinutes = 10, clear = 
       const raw = screenSignature(nodes, pkg);
       if (raw !== sig) alias[raw] = sig;
       const els = interactives(nodes, pkg);
-      register(sig, xml, els);
+      // Kaydırmanın getirdiği yeni öğeler de ilerlemedir: "20 eylemdir yeni ekran yok"
+      // sınırı uzun listeleri (sonu ancak kaydırınca görünen) yarıda kesmesin
+      if (register(sig, xml, els) > 0) lastNewAt = graph.stats.actions;
       cur = { sig, raw, nodes, els };
       continue;
     }

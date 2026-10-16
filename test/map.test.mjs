@@ -150,3 +150,23 @@ test('maxActions sınırına uyar', async () => {
   const g = await map({ pkg: PKG, out: out(), maxActions: 3, device: dev, sleep: dev.sleep });
   assert.ok(g.stats.actions <= 3);
 });
+
+/** Uzun liste: 30 öğe, yalnız sonuncusu yeni ekran açar (gerçek demo'daki "Ürün 25" durumu). */
+const longListApp = {
+  pkg: PKG,
+  start: 'list',
+  screens: {
+    list: {
+      title: 'Ürünler', viewport: 8,
+      items: Array.from({ length: 30 }, (_, i) => ({ text: `Ürün ${i + 1}`, to: i === 29 ? 'detail' : undefined })),
+    },
+    detail: { title: 'Son ürün', items: [{ text: 'Sepete ekle' }] },
+  },
+};
+
+test('uzun listede "yeni ekran yok" sınırı, kaydırma yeni öğe getirdikçe sıfırlanır', async () => {
+  const dev = fakeDevice(longListApp);
+  const g = await map({ pkg: PKG, out: out(), maxActions: 100, device: dev, sleep: dev.sleep });
+  assert.ok(titles(g).includes('Ürün 30'), `listenin sonu bulunamadı (durdu: ${g.stats.stop_reason})`);
+  assert.ok(titles(g).includes('Sepete ekle'), 'son öğenin açtığı ekran bulunamadı');
+});

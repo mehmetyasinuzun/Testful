@@ -80,3 +80,20 @@ test('maestro: log ve debug çıktısında şifre/OTP maskelenir, e-posta kalır
   assert.deepEqual(s, ['G1zli&şifre', '424242']);
   assert.equal(redact('Input text G1zli&şifre ... code 424242 for qa@x.com', s), 'Input text *** ... code *** for qa@x.com');
 });
+
+test('run: Maestro debug çıktısındaki takeScreenshot PNG\'leri durum klasörüne toplanır', async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync, readdirSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { collectScreenshots } = await import('../cli/lib/run.mjs');
+  const root = mkdtempSync(join(tmpdir(), 'testful-shots-'));
+  const debug = join(root, 'debug', 'DEMO-01-1');
+  mkdirSync(join(debug, 'DEMO-01.flow', 'takeScreenshot'), { recursive: true });
+  writeFileSync(join(debug, 'DEMO-01.flow', 'takeScreenshot', 'DEMO-01-1.png'), 'png');
+  writeFileSync(join(debug, 'screenshot-❌-hata.png'), 'png'); // hata görüntüsü kanıttır, senaryo görüntüsü değil
+  const shots = join(root, 'screenshots', 'normal');
+  mkdirSync(shots, { recursive: true });
+  assert.equal(collectScreenshots(debug, shots), 1);
+  assert.deepEqual(readdirSync(shots), ['DEMO-01-1.png']);
+  assert.equal(collectScreenshots(join(root, 'yok'), shots), 0);
+});
