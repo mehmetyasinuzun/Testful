@@ -112,6 +112,36 @@ test('giriş bilgisi yoksa formu sahte değerle dener, hata ekranını raporlar 
   });
 });
 
+/** Girişten sonra bir dal uygulamadan çıkarıyor; diğer dala dönmek için yeniden giriş gerekir. */
+const reloginApp = {
+  pkg: PKG,
+  start: 'login',
+  screens: {
+    login: {
+      title: 'Hoş geldin',
+      items: [
+        { text: 'E-posta', field: true, id: 'email' },
+        { text: 'Şifre', field: true, id: 'password', password: true },
+        { text: 'Giriş', to: (s, val) => (val('login', 'password') === 'pw' ? 'home' : 'login') },
+      ],
+    },
+    home: { title: 'Panel', items: [{ text: 'Paylaş', exit: true }, { text: 'Raporlar', to: 'reports' }, { text: 'Profil', to: 'profile' }] },
+    reports: { title: 'Rapor listesi', items: [{ text: 'Rapor 1' }] },
+    profile: { title: 'Profilim', items: [{ text: 'Düzenle' }] },
+  },
+};
+
+test('uygulamadan çıkınca giriş formunu yeniden doldurup kalan ekranlara döner', async () => {
+  await withEnv({ TESTFUL_LOGIN_USER: 'qa@x.com', TESTFUL_LOGIN_PASSWORD: 'pw' }, async () => {
+    const dev = fakeDevice(reloginApp);
+    // Her açılışta oturum sıfırlanır ve alanlar boştur (gerçek uygulama gibi)
+    const launch = dev.launch;
+    dev.launch = (pkg, o) => { dev.state.typed = {}; launch(pkg, o); };
+    const g = await map({ pkg: PKG, out: out(), maxActions: 100, device: dev });
+    for (const t of ['Rapor 1', 'Düzenle']) assert.ok(titles(g).includes(t), `yeniden giriş sonrası keşfedilmedi: ${t}`);
+  });
+});
+
 test('maxActions sınırına uyar', async () => {
   const dev = fakeDevice(treeApp);
   const g = await map({ pkg: PKG, out: out(), maxActions: 3, device: dev });

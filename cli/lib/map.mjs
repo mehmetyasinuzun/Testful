@@ -86,10 +86,11 @@ export async function map({ pkg, out, maxActions = 80, maxMinutes = 10, clear = 
     return { sig, raw, nodes, els };
   };
 
-  const edge = (from, to, el) => {
+  const edge = (from, to, el, { form = false } = {}) => {
     if (!to || from === to) return;
     if (graph.edges.some((e) => e.from === from && e.to === to && e.key === elKey(el))) return;
-    graph.edges.push({ from, to, via: el.label || elKey(el), key: elKey(el), via_selector: el.selector || null, at: el.center });
+    // form: bu geçiş ancak form doldurulunca çalışır (örn. giriş) → gezinme yeniden doldurur
+    graph.edges.push({ from, to, via: el.label || elKey(el), key: elKey(el), via_selector: el.selector || null, at: el.center, ...(form ? { form: true } : {}) });
     qlog(`  ${from} --[${el.label || elKey(el)}]--> ${to}`);
   };
 
@@ -122,6 +123,12 @@ export async function map({ pkg, out, maxActions = 80, maxMinutes = 10, clear = 
       graph.stats.navigations++;
       let ok = true;
       for (const e of path) {
+        if (e.form) {
+          // Yeniden açılışta oturum düşmüş olabilir: formu tekrar doldur, sonra gönder
+          for (const f of nxt.els.filter((x) => x.kind === 'field')) await fillField(f, classifyField(f));
+          const fresh = observe();
+          if (fresh.sig) nxt = fresh;
+        }
         const live = nxt.els.find((x) => elKey(x) === e.key);
         const at = live ? live.center : e.at;
         tap(at.x, at.y);
@@ -196,7 +203,7 @@ export async function map({ pkg, out, maxActions = 80, maxMinutes = 10, clear = 
         qlog(`  [FORM] ${form} formu dolduruldu → "${submit.label}"`);
         await sleep(2500);
         const nxt = observe();
-        edge(sig, nxt.sig, submit);
+        edge(sig, nxt.sig, submit, { form: true });
         cur = nxt.sig ? nxt : cur;
       } else {
         cur = fresh.sig ? fresh : cur;
