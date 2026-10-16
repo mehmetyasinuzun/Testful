@@ -1,116 +1,96 @@
-import { execSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { statfsSync, existsSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
+import { join, parse, resolve } from 'node:path';
 import { qlog } from './log.mjs';
-import { ADB } from './device.mjs';
+import { resolveAdb, listDevices, sdkTool, sdkRoot } from './device.mjs';
+import { resolveMaestro } from './maestro.mjs';
+import { which } from './util.mjs';
+import { EnvError } from './errors.mjs';
 
-function checkCmd(cmd) {
-  try {
-    execSync(`${cmd} --version`, { stdio: 'ignore' });
-    return true;
-  } catch {
-    try {
-      execSync(`${cmd} version`, { stdio: 'ignore' });
-      return true;
-    } catch {
-      return false;
-    }
-  }
+function versionOf(cmd, args) {
+  const r = spawnSync(cmd, args, { encoding: 'utf8', timeout: 30000 });
+  return `${r.stdout || ''}${r.stderr || ''}` || null;
+}
+
+export function javaMajor() {
+  const javaHome = process.env.JAVA_HOME && join(process.env.JAVA_HOME, 'bin', process.platform === 'win32' ? 'java.exe' : 'java');
+  const java = (javaHome && existsSync(javaHome) && javaHome) || which('java');
+  if (!java) return null;
+  const out = versionOf(java, ['-version']) || '';
+  const m = out.match(/version "(\d+)(?:\.(\d+))?/);
+  if (!m) return null;
+  return m[1] === '1' ? Number(m[2]) : Number(m[1]);
 }
 
 export function doctor() {
-  qlog('=== Testful doctor ===');
-  let ok = 0;
-  let bad = 0;
+  const checks = [];
+  const add = (name, ok, detail, fix, required = true) => checks.push({ name, ok, required, detail, fix: ok ? undefined : fix });
 
-  const pass = (msg) => { qlog(`[TAMAM] ${msg}`); ok++; };
-  const fail = (msg, action) => { qlog(`[EKSİK] ${msg} -> ${action}`); bad++; };
+  const nodeMajor = Number(process.versions.node.split('.')[0]);
+  add('node', nodeMajor >= 18, `v${process.versions.node}`, 'Node.js 18+ kur');
 
-  // 1) adb
-  if (ADB) {
-    pass(`adb (${ADB})`);
-  } else {
-    fail('adb', 'Android SDK platform-tools kur ya da PATH\'e ekle');
+  const adb = resolveAdb({ optional: true });
+  add('adb', !!adb, adb || 'bulunamadı', 'Android SDK platform-tools kur (ANDROID_HOME ayarla ya da PATH\'e ekle)');
+
+  if (adb) {
+    let devs = [];
+    try { devs = listDevices(); } catch {}
+    const ready = devs.filter((d) => d.state === 'device');
+    const unauth = devs.filter((d) => d.state === 'unauthorized');
+    add('cihaz', ready.length > 0,
+      ready.length ? ready.map((d) => d.serial).join(', ') : unauth.length ? `yetkisiz: ${unauth.map((d) => d.serial).join(', ')}` : 'bağlı cihaz yok',
+      unauth.length ? 'telefonda USB hata ayıklama iznini onayla' : `emülatör başlat: ${sdkTool('emulator/emulator')} -avd testful`);
   }
 
-  // 2) devices
-  if (ADB) {
+  const maestro = resolveMaestro({ optional: true });
+  add('maestro', !!maestro, maestro || 'bulunamadı', '"testful setup" ya da https://docs.maestro.dev kurulum rehberi');
+
+  const jm = javaMajor();
+  add('java 17+', jm !== null && jm >= 17, jm ? `Java ${jm}` : 'bulunamadı', 'JDK 17+ kur ve JAVA_HOME ayarla (Maestro için)');
+
+  const seenRoots = new Set();
+  for (const [label, p] of [['çalışma dizini', process.cwd()], ['geçici dizin', tmpdir()], ['ev dizini (AVD/Maestro)', homedir()]]) {
+    const root = parse(resolve(p)).root.toLowerCase();
+    if (seenRoots.has(root)) continue;
+    seenRoots.add(root);
     try {
-      const out = execSync(`"${ADB}" devices`, { encoding: 'utf8' }).trim().split('\n');
-      const lines = out.slice(1).map(l => l.trim()).filter(Boolean);
-      const devices = lines.filter(l => l.endsWith('\tdevice')).map(l => l.split('\t')[0]);
-      const unauthorized = lines.filter(l => l.endsWith('\tunauthorized')).map(l => l.split('\t')[0]);
+      const st = statfsSync(p);
+      const freeGb = (st.bavail * st.bsize) / 1e9;
+      add(`disk ${root}`, freeGb >= 8, `${freeGb.toFixed(1)} GB boş (${label})`, "en az 8 GB boş alan aç — dolu disk emülatörü ve Maestro JVM'ini sessizce bozar");
+    } catch {}
+  }
 
-      if (devices.length > 0) {
-        pass(`cihaz: ${devices.join(' ')}`);
-      } else if (unauthorized.length > 0) {
-        fail(`cihaz yetkisiz: ${unauthorized.join(' ')}`, "telefonda 'USB hata ayıklamaya izin ver' diyaloğunu onayla (bu bilgisayara her zaman izin ver)");
-      } else {
-        fail('bağlı cihaz yok', 'emülatör başlat ya da USB ile cihaz bağla');
-      }
+  const emu = sdkTool('emulator/emulator');
+  let avds = [];
+  if (existsSync(emu)) {
+    try { avds = execFileSync(emu, ['-list-avds'], { encoding: 'utf8', timeout: 30000 }).split(/\r?\n/).map((s) => s.trim()).filter((s) => s && !s.startsWith('INFO')); } catch {}
+  }
+  add('emülatör (AVD)', avds.length > 0, avds.length ? avds.join(', ') : `SDK: ${sdkRoot() || '-'}`, '"testful setup" yerel sistem imajından AVD kurar', false);
+
+  const flutter = which('flutter');
+  add('flutter', !!flutter, flutter || 'yok', 'yalnız Flutter projeleri için gerekli', false);
+  const patrol = which('patrol') || (process.env.LOCALAPPDATA && [join(process.env.LOCALAPPDATA, 'Pub', 'Cache', 'bin', 'patrol.bat')].find(existsSync)) || [join(homedir(), '.pub-cache', 'bin', 'patrol')].find(existsSync);
+  add('patrol', !!patrol, patrol || 'yok', 'Flutter derin mod için: dart pub global activate patrol_cli', false);
+
+  qlog('=== testful doctor ===');
+  for (const c of checks) {
+    const mark = c.ok ? '[TAMAM]' : c.required ? '[EKSİK]' : '[opsiyonel]';
+    qlog(`${mark} ${c.name}: ${c.detail}${c.fix ? `  → ${c.fix}` : ''}`);
+  }
+  const missing = checks.filter((c) => c.required && !c.ok);
+  qlog(missing.length ? `=== ${missing.length} zorunlu eksik ===` : '=== hazır ===');
+  return { ok: missing.length === 0, checks };
+}
+
+export function preflightDisk(minGb = 0.5) {
+  for (const p of [tmpdir(), homedir()]) {
+    try {
+      const st = statfsSync(p);
+      const freeGb = (st.bavail * st.bsize) / 1e9;
+      if (freeGb < minGb) throw new EnvError(`disk dolu: ${parse(resolve(p)).root} üzerinde ${freeGb.toFixed(2)} GB boş (${p}) — emülatör/Maestro güvenilir çalışamaz, yer aç`);
     } catch (e) {
-      fail('cihaz sorgulanamadı', `Hata: ${e.message}`);
+      if (e instanceof EnvError) throw e;
     }
   }
-
-  // 3) disk space
-  try {
-    const freeGbStr = execSync('powershell -Command "[Math]::Round(((Get-Volume -DriveLetter C).SizeRemaining) / 1GB)"', { encoding: 'utf8' }).trim();
-    const freeGb = parseInt(freeGbStr, 10);
-    if (!isNaN(freeGb) && freeGb < 8) {
-      fail(`disk: ${freeGb}GB boş`, 'en az 8GB önerilir — emülatör boot etmeyebilir (TEMP maestro*, flutter clean, gradle cache)');
-    } else {
-      pass(`disk: ${freeGbStr}GB boş`);
-    }
-  } catch {
-    pass('disk: boş alan doğrulanamadı (wmic/powershell hatası)');
-  }
-
-  // 4) flutter
-  if (checkCmd('flutter')) {
-    pass('flutter');
-  } else {
-    fail('flutter', 'Flutter SDK PATH\'te değil');
-  }
-
-  // 5) java
-  if (checkCmd('java')) {
-    pass('java');
-  } else {
-    fail('java', 'JDK 17+ gerekli (Maestro için)');
-  }
-
-  // 6) maestro
-  let maestroPath = '';
-  if (checkCmd('maestro')) {
-    maestroPath = 'maestro';
-  } else if (existsSync('C:\\dev\\maestro\\bin\\maestro')) {
-    maestroPath = 'C:\\dev\\maestro\\bin\\maestro';
-  } else if (existsSync('C:\\dev\\maestro\\bin\\maestro.bat')) {
-    maestroPath = 'C:\\dev\\maestro\\bin\\maestro.bat';
-  }
-
-  if (maestroPath) {
-    pass(`maestro (${maestroPath})`);
-  } else {
-    fail('maestro', 'kurulum: node cli/testful.mjs setup (ya da manual references/engines.md)');
-  }
-
-  // 7) patrol
-  let patrolPath = '';
-  const localPatrol = join(process.env.LOCALAPPDATA || '', 'Pub/Cache/bin/patrol.bat');
-  if (checkCmd('patrol')) {
-    patrolPath = 'patrol';
-  } else if (existsSync(localPatrol)) {
-    patrolPath = localPatrol;
-  }
-
-  if (patrolPath) {
-    pass(`patrol_cli (${patrolPath})`);
-  } else {
-    fail('patrol_cli', 'dart pub global activate patrol_cli');
-  }
-
-  qlog(`=== sonuç: ${ok} tamam, ${bad} eksik ===`);
-  return bad === 0;
 }

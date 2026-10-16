@@ -22,7 +22,7 @@ olur. Sunucuda otomatik koşu düşünüyorsan Linux en rahatı.
 | **Disk** | ~15 GB (SDK + sistem imajı + derleme) | 30 GB+ |
 | **GPU** | — | Donanım GL'li GPU emülatörü belirgin hızlandırır |
 
-## Yazılım (kur / doğrula: `doctor.sh`)
+## Yazılım (kur / doğrula: `testful doctor`)
 
 - **JDK 17+** (Maestro şartı; testte JDK 21 kullanıldı)
 - **Flutter SDK** (+ Dart) — Flutter hedefleri için
@@ -30,7 +30,7 @@ olur. Sunucuda otomatik koşu düşünüyorsan Linux en rahatı.
   (x86_64 host'ta x86_64 imaj; Apple Silicon'da arm64)
 - **Maestro CLI** — evrensel kara-kutu sürücü
 - **Patrol CLI** — Flutter derin mod (`dart pub global activate patrol_cli`)
-- **Node 18+** — rapor üreteci (`report.mjs`)
+- **Node 18.15+** — testful CLI (sıfır npm bağımlılığı)
 - **git** — self-repair'in git-güvenli dalları için
 
 ## API anahtarı gerekiyor mu? — **Hayır**
@@ -54,7 +54,7 @@ olur. Sunucuda otomatik koşu düşünüyorsan Linux en rahatı.
 ## Ağ / test verisi
 
 - Uygulama bir backend'e bağlıysa (örn. compass_app localhost:8080 sunucusu),
-  emülatör için `adb reverse tcp:PORT tcp:PORT` köprüsü gerekir (runner otomatik
-  uygular).
-- Login akışları için **test hesabı** kimlik bilgilerini `.qa/config.local.yaml`
-  (gitignore'lu) dosyasına koy — koda gömülmez.
+  emülatör için `adb reverse` köprüsü gerekir: `.qa/testful.json` → `"reverse": [8080]`
+  (run ve map her denemeden önce otomatik uygular).
+- Login akışları için **test hesabı** kimlik bilgilerini `.qa/env.local`
+  (gitignore'lu, `EMAIL=...`) dosyasına koy; flow'larda `${MAESTRO_EMAIL}` olarak kullanılır.

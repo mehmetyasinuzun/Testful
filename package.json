@@ -1,18 +1,26 @@
 {
   "name": "testful",
-  "version": "0.2.0",
-  "description": "Güven-öncelikli, AI-destekli mobil UX/UI test aracı — ölçüm çekirdeği + ince AI kabuğu",
+  "version": "0.3.0",
+  "description": "AI ile kod yazanlar için Android test çekirdeği — senaryosuz smoke, otonom harita, haritadan regresyon, güven-öncelikli rapor",
   "type": "module",
   "bin": {
     "testful": "cli/testful.mjs"
   },
+  "files": [
+    "cli/",
+    ".claude/skills/mobile-ux-test/",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
+    "test": "node --test",
     "doctor": "node cli/testful.mjs doctor",
     "setup": "node cli/testful.mjs setup"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=18.15"
   },
+  "keywords": ["android", "testing", "maestro", "flutter", "react-native", "qa", "ai", "claude-code"],
   "license": "MIT",
   "author": "Mehmet Yasin UZUN",
   "repository": {

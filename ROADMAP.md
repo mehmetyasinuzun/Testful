@@ -5,10 +5,10 @@ katman koşar), güven-öncelikli mobil QA ajanı. Para birimimiz: bulgulara
 duyulan güven (düşük yanlış-alarm + tekrarlanabilirlik).
 
 ## Mimari: Ölçüm Çekirdeği + İnce AI Kabuğu (tek boru hattı)
-- **Çekirdek (AI'sız, CI'da koşar):** crawler (`explore.mjs`) · koşucu
-  (`run-suite.sh`: izolasyon + 3× retry + flaky-karantina) · kaos
-  (`monkey.sh` sabit seed) · logcat imzaları · rapor üreteci (`report.mjs`)
-  · günlük log (`log.sh` → `.qa/logs/`).
+- **Çekirdek (AI'sız, CI'da koşar):** `testful` CLI — `smoke` (senaryosuz
+  karar) · `map` (crawler) · `author --from-map` · `run` (izolasyon + 3× retry +
+  flaky-karantina + logcat çökme atfı) · `report` (karar + run-diff) · günlük
+  log (`.qa/logs/`).
 - **AI kabuğu (seçici, pakete bakar):** senaryo yazarı · vision hakemi (yeni
   ekran başına 1 kez, stateless) · kök-neden · git-safe fix loop · blocker →
   kullanıcıya sor → devam.
@@ -39,7 +39,7 @@ duyulan güven (düşük yanlış-alarm + tekrarlanabilirlik).
 - Açık: ENV-02 (adb reverse köprü gecikmesi BOOK akışlarında timeout —
   kalıcı çözüm Faz 2 adb-direct sürüş)
 
-## Faz 2 — Motor: `testful` CLI 🔄 BAŞLADI (olgunluk-kapılı, modül modül)
+## Faz 2 — Motor: `testful` CLI 🔄 (olgunluk-kapılı, modül modül)
 Tasarım yasası (SpeakSmith saha dersi): **seçiciler kaynaktan tahmin edilmez —
 observe-first**: her ekranın GERÇEK a11y ağacından çıkarılır; kaynak akışı
 öngörür, ağaç seçiciyi verir. Kapı geçilmeden sonraki modüle GEÇİLMEZ.
@@ -55,19 +55,23 @@ observe-first**: her ekranın GERÇEK a11y ağacından çıkarılır; kaynak ak�
       4 geçiş, ~%45 kapsama (onboarding isim-kapısında durdu — doğru davranış).
 - [x] v0.2 `setup` ✅: yerel AVD'yi imajdan kurar (indirmesiz); `package.json`
       bin=testful (npm link → global `testful`); tek-komut `doctor`
-- [ ] v0.3 `author`: selectors.json + kaynak haritası → senaryo iskeleti
-      (AI'ya hazır paket; Sonnet rutini için biçilmiş görev) ← SIRADAKİ
-- [ ] **KAPI-2:** 2 uygulama × 10 koşu flakiness ölçümü
-- [ ] v0.4 run portu: Maestro'suz adb-direct sürüş + env-fail ≠ senaryo-fail
-      ayrımı + koşu-başı otomatik sağlık kontrolü
-- [ ] Durum matrisi otomasyonu: karanlık · font 1.3× · döndürme · offline
+- [x] **v0.3** ✅ (2026-10-16): mimari sağlamlaştırma + ürünleşme
+      - `smoke`: senaryosuz karar (kur → soğuk açılış → çökme/ANR → a11y → seed'li kaos)
+      - `author --from-map`: haritadan her ekrana regresyon flow'u (AI'sız, ezmez, sır-güvenli)
+      - `run` Node'a taşındı: env-fail ≠ senaryo-fail (exit 3), logcat çökme atfı,
+        Maestro hata nedeni, zaman aşımı, izolasyon, durum matrisi geri yükleme, run-diff
+      - tek rapor şeması (`testful/report@1`), `--json` kompakt karar, `next_actions`
+      - status bar demo modu, adb geçici kopma dayanıklılığı, disk ön-kontrolü
+      - crawler: etiketli-önce, frontier dönüşü, dolu alan koruması, takılma nedeni, mermaid
+      - `init` (iskelet + skill), platform-bağımsız doctor/setup, 24 birim/entegrasyon testi
+- [ ] **KAPI-2:** 2 uygulama × 10 koşu flakiness ölçümü (Kotlin native dahil) ← SIRADAKİ
+- [ ] Patrol koşucusu (`engine: patrol` senaryoları için)
+- [ ] Görsel regresyon akışı: `assertScreenshot` baseline üretimi (`testful baseline`)
 
 ## Faz 3 — Ürünleşme ⬜
 - [ ] **Çoklu AI sağlayıcı:** `testful judge --provider deepseek|openai|anthropic`
       (BYOK; sözleşme = ölçüm paketi → JSON hüküm; vision destekli her model)
 - [ ] MCP server: motoru saran ince adaptör (Cursor ve diğer istemciler)
-- [ ] Görsel regresyon: baseline screenshot + algısal diff (deterministik)
-- [ ] Run-diff raporu: yeni / çözülen / devam eden
 - [ ] İnteraktif HTML harita (screenshot-düğümlü, tıklanabilir, ısı haritası)
 - [ ] Linux CI: KVM'li Docker emülatör konteyneri
 - [ ] RESILIENCE / PERFORMANCE / STORE tier'larının tam otomasyonu

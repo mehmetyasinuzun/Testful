@@ -37,7 +37,7 @@ context7 ile doğrula (Patrol: leancode.co docs, Maestro: maestro.dev).
   ekler: `"Kelimeler\nSekme 2 / 5"` — sekme dokunuşları HER ZAMAN
   `tapOn: 'Etiket[\s\S]*'`. Büyük APK dersi: Maestro `launchApp` (clearState)
   ağır debug uygulamalarda dadb timeout'una düşer — `TESTFUL_PRELAUNCH=1` ile
-  launch'ı adb'ye ver (run-suite.sh), flow'lar launchApp'sız "bağlan ve sür" olur.
+  launch'ı adb'ye ver (`testful run` ya da `.qa/testful.json` → `"prelaunch": true`), flow'lar launchApp'sız "bağlan ve sür" olur.
 - **Birleşik semantics tuzağı (saha dersi):** Flutter, kart benzeri widget'larda
   başlık+alt metni TEK düğümde birleştirir (`"Alaska, North America\n20 Jul - 15 Aug"`).
   Maestro tam-eşleşme yaptığından alt-metin seçicisi tutmaz — `[\s\S]*` sonekiyle yaz:
@@ -60,6 +60,19 @@ context7 ile doğrula (Patrol: leancode.co docs, Maestro: maestro.dev).
   yapmak: `const String.fromEnvironment('API_HOST')` + `flutter build ... --dart-define=API_HOST=10.0.2.2`.
   Bu hem testi sağlamlaştırır hem gerçek bir esneklik (ENV bulgusu).
 
+## Görsel regresyon (Maestro'ya delege)
+Maestro 2.2+ `assertScreenshot` komutu baseline görüntüyle karşılaştırır
+(`thresholdPercentage`, varsayılan 95; `cropOn` ile bölge). testful run/smoke
+status bar'ı demo moduna alır (sabit saat/pil/sinyal) → baseline'lar kararlıdır.
+Baseline'ı ilk koşuda `takeScreenshot` ile üret, commit'le, sonra flow'a ekle:
+```yaml
+- assertScreenshot:
+    path: baselines/home.png
+    thresholdPercentage: 97
+```
+Sürüm notu (2026-10): güncel Maestro CLI 2.11; 2.6'da gömülü web Studio ve
+Rhino JS kaldırıldı (yalnız GraalJS). `testful setup` en son sürümü indirir.
+
 ## Fallback sürücü (Maestro yok ya da ağaç boş)
 1. `adb exec-out uiautomator dump /dev/tty` → XML ağacı al, `bounds` parse
    et, merkeze `adb shell input tap <x> <y>`.
@@ -70,8 +83,9 @@ context7 ile doğrula (Patrol: leancode.co docs, Maestro: maestro.dev).
 ## adb düğmeleri (emülatörde güvenli)
 | İş | Komut |
 |---|---|
-| Animasyon kapat/aç | `scripts/animations.sh off\|on` |
-| Uygulama sıfırla | `scripts/reset-app.sh <pkg>` (`pm clear` veri + runtime izinleri birlikte sıfırlar) |
+| Animasyon kapat/aç | `testful animations off\|on` (run/smoke/map otomatik yapar) |
+| Durum matrisi | `testful run --matrix dark,large-font,landscape,offline` (önceki değerler otomatik geri yüklenir) |
+| Uygulama sıfırla | `testful reset <pkg>` (`pm clear` veri + runtime izinleri birlikte sıfırlar) |
 | İzin ön-verme | `adb shell pm grant <pkg> android.permission.X` |
 | Karanlık mod | `adb shell cmd uimode night yes\|no` |
 | Font ölçeği | `adb shell settings put system font_scale 1.3` (test sonrası `1.0`) |
@@ -80,11 +94,14 @@ context7 ile doğrula (Patrol: leancode.co docs, Maestro: maestro.dev).
 | Arka plan→ön plan | `adb shell input keyevent KEYCODE_HOME` + `adb shell monkey -p <pkg> 1` |
 | Soğuk açılış süresi | `adb shell am start -W <pkg>/<activity>` → `TotalTime` |
 | Jank/FPS | `adb shell dumpsys gfxinfo <pkg>` + Flutter integration_test frame metrikleri |
-| Ekran görüntüsü | `scripts/screenshot.sh <dosya.png>` (asla PowerShell yönlendirmesi) |
+| Ekran görüntüsü | `testful screenshot <dosya.png>` (binary-güvenli) |
 
 ## Windows kuralları
 - Tüm adb/maestro/patrol komutları **Bash tool** üzerinden koşar.
 - `adb exec-out screencap -p > x.png` PowerShell'de PNG'yi bozar (CRLF);
-  Bash'te güvenlidir — script zaten bunu yapar.
-- adb PATH'te olmayabilir; script'ler `%LOCALAPPDATA%\Android\Sdk\platform-tools`
-  konumundan otomatik çözer (`scripts/env.sh`).
+  `testful screenshot` Node üzerinden binary-güvenli yazar.
+- adb PATH'te olmayabilir; testful `ADB`, `ANDROID_HOME`, `ANDROID_SDK_ROOT` ve
+  varsayılan SDK konumlarından otomatik çözer.
+- **C: dolarsa her şey sessizce bozulur** (Maestro JVM geçici dosya açamaz,
+  emülatör yazamaz). `testful doctor` geçici dizin + ev dizini diskini de ölçer;
+  `run`/`smoke` dolu diskte koşmayı reddeder (exit 3).
