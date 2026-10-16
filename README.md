@@ -105,6 +105,18 @@ bash $S/logcat-scan.sh out.txt                 # çökme/ANR/overflow imzaları
 Çıktılar: `<app_dir>/.qa/results/<run-id>/` → `report.md` (insan) +
 `report.json` (makine) + ekran görüntüleri + logcat.
 
+### C) GitHub Actions ile — bilgisayarsız (bulut emülatörü)
+Herhangi bir uygulama reposuna tek dosya ekle; her push/PR'da GitHub'ın KVM'li
+Linux makinesinde gerçek emülatör açılır, APK derlenir (Flutter / React Native /
+Expo / native otomatik algılanır), keşif + senaryo + kaos koşar, sonuç iş
+özetine ve PR yorumuna düşer:
+```yaml
+jobs:
+  testful:
+    uses: mehmetyasinuzun/Testful/.github/workflows/testful.yml@main
+```
+Hazır dosya: `node cli/testful.mjs ci-init <repo>` · ayrıntı: [docs/CI.md](docs/CI.md).
+
 ## Loglama
 
 Araç çalıştığı yerde günlük log tutar: `<app_dir>/.qa/logs/YYYY-MM-DD.log`
@@ -154,7 +166,11 @@ olan Flutter için tasarlandı — diğerleri daha da rahat.
     doctor.sh · run-suite.sh · explore.mjs · report.mjs · monkey.sh
     logcat-scan.sh · reset-app.sh · animations.sh · screenshot.sh
     new-run.sh · env.sh · log.sh
-examples/                  örnek senaryo çifti + örnek rapor
+action.yml + ci/            GitHub Actions: derle → emülatör → keşif/senaryo/kaos → özet
+.github/workflows/         testful.yml (diğer repoların çağırdığı) · self-test.yml
+templates/testful-ci.yml   hedef repoya konan tek workflow dosyası
+docs/CI.md                 bulut CI rehberi (telefondan kullanım dahil)
+examples/                  örnek senaryo çifti + örnek rapor + demo-app (CI öz-testi)
 ROADMAP.md                 faz planı ve güncel durum
 ```
 

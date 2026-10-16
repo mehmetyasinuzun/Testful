@@ -7,11 +7,14 @@ function resolveAdb() {
     if (!cand) continue;
     try { execFileSync(cand, ['version'], { stdio: 'ignore' }); return cand; } catch {}
   }
-  throw new Error('adb bulunamadı (PATH ya da %LOCALAPPDATA%\\Android\\Sdk\\platform-tools)');
+  return null; // doctor bunu raporlar; adb gerektiren komutlar adb() çağrısında hata verir
 }
 
 export const ADB = resolveAdb();
-export const adb = (...a) => execFileSync(ADB, a, { maxBuffer: 64e6 });
+export const adb = (...a) => {
+  if (!ADB) throw new Error('adb bulunamadı (PATH ya da %LOCALAPPDATA%\\Android\\Sdk\\platform-tools)');
+  return execFileSync(ADB, a, { maxBuffer: 64e6 });
+};
 export const adbStr = (...a) => adb(...a).toString('utf8');
 
 export function requireDevice() {

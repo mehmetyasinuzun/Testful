@@ -1,0 +1,14 @@
+id: DEMO-02
+title: Profil ekranında isim kaydedilir
+archetype: form
+tier: core
+engine: maestro
+package: dev.testful.demo
+preconditions:
+  - reset-app
+steps:
+  - do: "Profil'e dokun"
+    expect: "Profil ekranı açılır, 'Kaydet' butonu görünür"
+  - do: "isim alanına 'Ayse' yaz ve Kaydet'e dokun"
+    expect: "'Merhaba, Ayse' mesajı görünür"
+    shot: true

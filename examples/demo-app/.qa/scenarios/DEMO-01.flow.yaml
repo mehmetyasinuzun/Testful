@@ -1,0 +1,10 @@
+appId: dev.testful.demo
+---
+- clearState
+- launchApp
+- extendedWaitUntil:
+    visible: "Testful Demo"
+    timeout: 15000
+- takeScreenshot: DEMO-01-1
+- assertVisible: "Profil"
+- assertVisible: "Ayarlar"

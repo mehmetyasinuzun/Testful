@@ -1,0 +1,12 @@
+id: DEMO-01
+title: Uygulama açılır ve ana ekran görünür
+archetype: universal
+tier: core
+engine: maestro
+package: dev.testful.demo
+preconditions:
+  - reset-app
+steps:
+  - do: launch
+    expect: "uygulama çökmeden açılır ve 'Testful Demo' başlığı görünür"
+    shot: true

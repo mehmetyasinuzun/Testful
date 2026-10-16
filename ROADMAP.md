@@ -69,7 +69,8 @@ observe-first**: her ekranın GERÇEK a11y ağacından çıkarılır; kaynak ak�
 - [ ] Görsel regresyon: baseline screenshot + algısal diff (deterministik)
 - [ ] Run-diff raporu: yeni / çözülen / devam eden
 - [ ] İnteraktif HTML harita (screenshot-düğümlü, tıklanabilir, ısı haritası)
-- [ ] Linux CI: KVM'li Docker emülatör konteyneri
+- [x] Linux CI: GitHub Actions (KVM'li runner + emülatör) — `action.yml`,
+      reusable workflow, PR yorumu, demo-app öz-testi (bkz. docs/CI.md)
 - [ ] RESILIENCE / PERFORMANCE / STORE tier'larının tam otomasyonu
 
 ## Faz 4 — Yayılım ⬜

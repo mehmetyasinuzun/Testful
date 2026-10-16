@@ -1,0 +1,64 @@
+# Testful'un kendi CI'ı: CLI/script kontrolleri + demo uygulamada gerçek emülatörde uçtan uca koşu.
+name: Testful self-test
+
+on:
+  push:
+    paths-ignore: ['**.md']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: self-test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - name: Sözdizimi (node + bash)
+        run: |
+          for f in cli/*.mjs cli/lib/*.mjs ci/*.mjs; do node --check "$f"; done
+          for f in ci/*.sh; do bash -n "$f"; done
+      - name: ci-init şablonu üretir
+        run: |
+          d="$(mktemp -d)"
+          node cli/testful.mjs ci-init "$d"
+          grep -q 'mehmetyasinuzun/Testful/.github/workflows/testful.yml@main' "$d/.github/workflows/testful.yml"
+          ! node cli/testful.mjs ci-init "$d"   # üzerine yazmayı reddetmeli
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - id: testful
+        uses: ./
+        with:
+          working-directory: examples/demo-app
+          fail-on: crash
+          monkey-events: '500'
+          artifact-name: testful-demo-report
+      - name: Demo beklentilerini doğrula
+        env:
+          OUT: ${{ steps.testful.outputs.report-dir }}
+        run: |
+          node - <<'JS'
+          const fs = require('fs');
+          const g = JSON.parse(fs.readFileSync(`${process.env.OUT}/map/graph.json`, 'utf8'));
+          const r = JSON.parse(fs.readFileSync(`${process.env.OUT}/run/report.json`, 'utf8'));
+          const fail = (m) => { console.error(`::error::${m}`); process.exitCode = 1; };
+          if (g.stats.screens < 3) fail(`keşif en az 3 ekran bulmalı, bulunan: ${g.stats.screens}`);
+          const labels = Object.values(g.nodes).flatMap((n) => n.interactives.map((e) => e.label));
+          if (!labels.includes('Profil')) fail('ana ekrandaki "Profil" butonu haritada yok');
+          if (!Object.values(g.nodes).some((n) => n.interactives.some((e) => e.a11y_missing))) fail('etiketsiz ikon buton a11y bulgusu olarak yakalanmadı');
+          if (g.edges.some((e) => /Hesab. sil/.test(e.via))) fail('keşif riskli "Hesabı sil" butonuna dokundu');
+          if (r.totals.passed !== 2) fail(`DEMO-01/02 geçmeli, sonuç: ${JSON.stringify(r.totals)}`);
+          console.log('demo beklentileri tamam:', g.stats, r.totals);
+          JS

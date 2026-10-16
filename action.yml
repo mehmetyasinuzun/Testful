@@ -1,0 +1,193 @@
+name: Testful — mobil UX testi
+description: APK'yı derler, gerçek Android emülatöründe otonom keşif + senaryo + kaos testi koşar, raporu özet/PR yorumu/artifact olarak yayınlar.
+author: Mehmet Yasin UZUN
+branding:
+  icon: compass
+  color: purple
+
+inputs:
+  working-directory:
+    description: Hedef uygulamanın kök klasörü (monorepo ise alt klasör).
+    default: .
+  apk-path:
+    description: Hazır APK yolu (working-directory'ye göre). Verilirse derleme atlanır.
+    default: ''
+  build-command:
+    description: Özel derleme komutu (otomatik algılama yerine). APK'yı en yeni *.apk olarak bulur.
+    default: ''
+  package:
+    description: Uygulama paket adı. Boşsa APK'dan okunur.
+    default: ''
+  api-level:
+    description: Emülatör Android API seviyesi.
+    default: '34'
+  target:
+    description: Emülatör sistem imajı hedefi (google_apis, default, ...).
+    default: google_apis
+  max-actions:
+    description: Otonom keşifte en çok dokunuş sayısı.
+    default: '60'
+  monkey-events:
+    description: Kaos testi olay sayısı (0 = kapalı).
+    default: '1000'
+  scenarios:
+    description: Koşulacak senaryo ID kalıbı (.qa/scenarios altında, örn. "CORE-*").
+    default: '*'
+  matrix:
+    description: Ek durumlar, virgülle (dark,large-font,landscape,offline).
+    default: ''
+  fail-on:
+    description: "Ne zaman kırmızı olsun: scenario (kurulum/açılış/senaryo hatası) · crash (+ çökme/ANR) · never"
+    default: scenario
+  pr-comment:
+    description: PR'da özet yorumu yaz/güncelle.
+    default: 'true'
+  artifact-name:
+    description: Rapor artifact adı.
+    default: testful-report
+  java-version:
+    description: JDK sürümü (Gradle + Maestro).
+    default: '17'
+  flutter-channel:
+    description: Flutter projelerinde kullanılacak kanal.
+    default: stable
+  github-token:
+    description: PR yorumu için token.
+    default: ${{ github.token }}
+
+outputs:
+  verdict:
+    description: pass | fail
+    value: ${{ steps.verdict.outputs.verdict }}
+  report-dir:
+    description: Rapor klasörünün yolu.
+    value: ${{ steps.paths.outputs.out }}
+
+runs:
+  using: composite
+  steps:
+    - id: paths
+      shell: bash
+      run: |
+        echo "TESTFUL_HOME=$GITHUB_ACTION_PATH" >> "$GITHUB_ENV"
+        echo "out=$RUNNER_TEMP/testful-out" >> "$GITHUB_OUTPUT"
+        cd "${{ inputs.working-directory }}" && echo "app=$(pwd)" >> "$GITHUB_OUTPUT"
+
+    - id: detect
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        APK_PATH: ${{ inputs.apk-path }}
+        BUILD_COMMAND: ${{ inputs.build-command }}
+      run: bash "$TESTFUL_HOME/ci/detect.sh"
+
+    - name: KVM'i aç (emülatör donanım hızlandırması)
+      shell: bash
+      run: |
+        echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+        sudo udevadm control --reload-rules
+        sudo udevadm trigger --name-match=kvm
+
+    - uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: ${{ inputs.java-version }}
+
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - if: steps.detect.outputs.kind == 'flutter'
+      uses: subosito/flutter-action@v2
+      with:
+        channel: ${{ inputs.flutter-channel }}
+        cache: true
+
+    - id: build
+      name: APK derle
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        APK_PATH: ${{ inputs.apk-path }}
+        BUILD_COMMAND: ${{ inputs.build-command }}
+        PROJECT_KIND: ${{ steps.detect.outputs.kind }}
+      run: bash "$TESTFUL_HOME/ci/build-apk.sh"
+
+    - id: pkg
+      name: Paket adını bul
+      shell: bash
+      env:
+        PKG: ${{ inputs.package }}
+        APK: ${{ steps.build.outputs.apk }}
+      run: |
+        if [ -z "$PKG" ]; then
+          aapt="$(ls -1d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)aapt"
+          PKG="$("$aapt" dump badging "$APK" | sed -n "s/^package: name='\([^']*\)'.*/\1/p")"
+        fi
+        [ -n "$PKG" ] || { echo "::error::Paket adı bulunamadı — 'package' girdisini ver."; exit 1; }
+        echo "pkg=$PKG" >> "$GITHUB_OUTPUT"
+        echo "Paket: $PKG"
+
+    - if: steps.detect.outputs.has_scenarios == 'true'
+      name: Maestro kur
+      shell: bash
+      run: |
+        curl -fsSL "https://get.maestro.mobile.dev" | bash
+        echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+
+    - name: Emülatörde test koş
+      uses: reactivecircus/android-emulator-runner@v2
+      env:
+        APK: ${{ steps.build.outputs.apk }}
+        PKG: ${{ steps.pkg.outputs.pkg }}
+        OUT: ${{ steps.paths.outputs.out }}
+        APP_DIR: ${{ steps.paths.outputs.app }}
+        MAX_ACTIONS: ${{ inputs.max-actions }}
+        MONKEY_EVENTS: ${{ inputs.monkey-events }}
+        SCENARIOS_GLOB: ${{ inputs.scenarios }}
+        MATRIX: ${{ inputs.matrix }}
+        HAS_SCENARIOS: ${{ steps.detect.outputs.has_scenarios }}
+      with:
+        api-level: ${{ inputs.api-level }}
+        target: ${{ inputs.target }}
+        arch: x86_64
+        profile: pixel_6
+        disable-animations: true
+        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot
+        script: bash "$TESTFUL_HOME/ci/emulator-job.sh"
+
+    - id: verdict
+      if: always() && steps.build.outcome == 'success'
+      name: Özet ve karar
+      shell: bash
+      continue-on-error: true
+      env:
+        OUT: ${{ steps.paths.outputs.out }}
+        PKG: ${{ steps.pkg.outputs.pkg }}
+        FAIL_ON: ${{ inputs.fail-on }}
+        MONKEY_EVENTS: ${{ inputs.monkey-events }}
+        ARTIFACT_NAME: ${{ inputs.artifact-name }}
+      run: node "$TESTFUL_HOME/ci/summary.mjs"
+
+    - if: always() && inputs.pr-comment == 'true' && steps.verdict.outcome != 'skipped'
+      name: PR yorumu
+      shell: bash
+      env:
+        OUT: ${{ steps.paths.outputs.out }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: node "$TESTFUL_HOME/ci/pr-comment.mjs"
+
+    - if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ steps.paths.outputs.out }}
+        if-no-files-found: ignore
+        retention-days: 14
+
+    - if: always() && steps.verdict.outputs.verdict == 'fail'
+      name: Testful sonucu
+      shell: bash
+      run: |
+        echo "::error::Testful kırmızı — ayrıntı iş özetinde ve PR yorumunda."
+        exit 1

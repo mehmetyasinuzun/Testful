@@ -1,0 +1,31 @@
+# Testful — her push/PR'da gerçek Android emülatöründe otomatik UX testi.
+# Proje türü (Flutter / React Native / Expo / native Gradle) otomatik algılanır.
+# Sonuç: Actions iş özeti + PR yorumu + "testful-report" artifact'ı (ekran görüntüleri, logcat, harita).
+# Ayrıntı: https://github.com/mehmetyasinuzun/Testful/blob/main/docs/CI.md
+name: Testful
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: testful-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  testful:
+    uses: mehmetyasinuzun/Testful/.github/workflows/testful.yml@main
+    # İhtiyaç olursa aç:
+    # with:
+    #   working-directory: mobile          # uygulama alt klasördeyse
+    #   apk-path: build/app-debug.apk      # hazır APK varsa (derleme atlanır)
+    #   build-command: ./scripts/build.sh  # özel derleme
+    #   package: com.sirket.uygulama       # boşsa APK'dan okunur
+    #   fail-on: crash                     # çökme/ANR'de de kırmızı ol
+    #   matrix: dark,large-font            # ek durumlar

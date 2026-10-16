@@ -26,6 +26,8 @@ kullanım:
                                                   ekran paketlerinden senaryo iskeleti üretir
   testful doctor                                  ortam sağlık kontrolü (native Node.js)
   testful setup                                   yerel emülatör + Maestro CLI kurulumu (indirmeli/yerel)
+  testful ci-init [repo_dir] [--force]            repoya GitHub Actions workflow'u ekler: her push/PR'da
+                                                  bulut emülatöründe test (bkz. docs/CI.md)
 `;
 
 function arg(flag, def) {
@@ -109,6 +111,17 @@ try {
     process.exit(passed ? 0 : 1);
   } else if (cmd === 'setup') {
     setup();
+  } else if (cmd === 'ci-init') {
+    const dir = process.argv[3] && !process.argv[3].startsWith('-') ? process.argv[3] : '.';
+    const { existsSync, mkdirSync, copyFileSync } = await import('node:fs');
+    const target = join(dir, '.github', 'workflows', 'testful.yml');
+    if (existsSync(target) && !process.argv.includes('--force')) {
+      console.error(`zaten var: ${target} (üzerine yazmak için --force)`);
+      process.exit(1);
+    }
+    mkdirSync(dirname(target), { recursive: true });
+    copyFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'templates', 'testful-ci.yml'), target);
+    console.log(`eklendi: ${target}\ncommit + push et → Actions sekmesinde "Testful" koşusu başlar.`);
   } else {
     console.log(HELP);
     process.exit(cmd ? 2 : 0);
