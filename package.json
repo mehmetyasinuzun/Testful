@@ -1,22 +1,33 @@
 {
   "name": "testful",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Güven-öncelikli, AI-destekli mobil UX/UI test aracı — ölçüm çekirdeği + ince AI kabuğu",
   "type": "module",
   "bin": {
     "testful": "cli/testful.mjs"
   },
   "scripts": {
+    "test": "node --test test/map.test.mjs test/units.test.mjs test/judge.test.mjs",
     "doctor": "node cli/testful.mjs doctor",
     "setup": "node cli/testful.mjs setup"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "license": "MIT",
   "author": "Mehmet Yasin UZUN",
   "repository": {
     "type": "git",
     "url": "https://github.com/mehmetyasinuzun/Testful.git"
-  }
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.135.0"
+  },
+  "files": [
+    "cli/",
+    "templates/",
+    "action.yml",
+    "README.md",
+    "LICENSE"
+  ]
 }

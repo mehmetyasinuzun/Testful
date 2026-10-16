@@ -8,6 +8,7 @@ public class MainActivity extends Screen {
         title("Testful Demo");
         button("Profil", ProfileActivity.class);
         button("Ayarlar", SettingsActivity.class);
+        button("Ürünler", ProductsActivity.class);
 
         // Kasıtlı a11y kusuru: etiketsiz ikon buton (Testful "a11y-eksik" bulgusu üretmeli).
         ImageButton gear = new ImageButton(this);

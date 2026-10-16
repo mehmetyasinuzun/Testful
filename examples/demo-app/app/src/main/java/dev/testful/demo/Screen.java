@@ -42,6 +42,8 @@ abstract class Screen extends Activity {
     protected Button button(String text, Class<? extends Activity> target) {
         Button b = new Button(this);
         b.setText(text);
+        // Büyük harf dönüşümü cihaz diline bağlıdır ("Giriş" → "GIRIŞ"); öz-test deterministik olsun
+        b.setAllCaps(false);
         if (target != null) b.setOnClickListener(v -> startActivity(new Intent(this, target)));
         root.addView(b, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
         return b;

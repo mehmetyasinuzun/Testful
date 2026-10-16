@@ -10,6 +10,8 @@ export function parseNodes(xml) {
     const b = attr('bounds').match(/\[(\d+),(\d+)\]\[(\d+),(\d+)\]/);
     nodes.push({
       pkg: attr('package'),
+      // resource-id'nin kısa adı ("com.app:id/password" → "password")
+      id: attr('resource-id').split('/').pop(),
       cls: attr('class'),
       desc: attr('content-desc').replace(/&#10;/g, '\n').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'"),
       text: attr('text').replace(/&#10;/g, '\n').replace(/&amp;/g, '&'),
@@ -57,6 +59,7 @@ export function interactives(nodes, pkg) {
     const base = {
       kind: isField ? 'field' : isTab ? 'tab' : 'button',
       label: label ? label.split('\n')[0].slice(0, 60) : null,
+      id: n.id || undefined,
       full_text: label || null,
       a11y_missing: !label || undefined,
       password: n.password || undefined,

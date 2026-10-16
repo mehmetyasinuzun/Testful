@@ -1,24 +1,17 @@
 import { execFileSync } from 'node:child_process';
-import { join } from 'node:path';
 import { writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { resolveAdb } from './platform.mjs';
 
-function resolveAdb() {
-  for (const cand of [process.env.ADB, 'adb', join(process.env.LOCALAPPDATA || '', 'Android/Sdk/platform-tools/adb.exe')]) {
-    if (!cand) continue;
-    try { execFileSync(cand, ['version'], { stdio: 'ignore' }); return cand; } catch {}
-  }
-  return null; // doctor bunu raporlar; adb gerektiren komutlar adb() çağrısında hata verir
-}
-
+// null ise doctor raporlar; adb gerektiren komutlar adb() çağrısında hata verir
 export const ADB = resolveAdb();
 export const adb = (...a) => {
-  if (!ADB) throw new Error('adb bulunamadı (PATH ya da %LOCALAPPDATA%\\Android\\Sdk\\platform-tools)');
+  if (!ADB) throw new Error('adb bulunamadı (PATH, ANDROID_HOME ya da varsayılan Android SDK konumu)');
   return execFileSync(ADB, a, { maxBuffer: 64e6 });
 };
 export const adbStr = (...a) => adb(...a).toString('utf8');
 
 export function requireDevice() {
-  const lines = adbStr('devices').trim().split('\n').slice(1).filter(Boolean);
+  const lines = adbStr('devices').trim().split(/\r?\n/).slice(1).filter(Boolean);
   const dev = lines.find((l) => l.endsWith('\tdevice'));
   if (!dev) throw new Error('bağlı cihaz yok (emülatör başlat: emulator -avd testful -snapshot temiz)');
   return dev.split('\t')[0];
@@ -37,8 +30,23 @@ export function dumpTree() {
 }
 
 export const screenshot = () => adb('exec-out', 'screencap', '-p');
+/** Ekran yoğunluğu (dpi); varsa Override değeri. Dokunma hedefi (dp) hesabı için. */
+export function density() {
+  try {
+    const out = adbStr('shell', 'wm', 'density');
+    const m = out.match(/Override density: (\d+)/) || out.match(/Physical density: (\d+)/);
+    return m ? Number(m[1]) : null;
+  } catch { return null; }
+}
 export const tap = (x, y) => adb('shell', 'input', 'tap', String(x), String(y));
-export const typeText = (s) => adb('shell', 'input', 'text', s.replace(/ /g, '%s'));
+/**
+ * `adb shell input text` argümanı cihaz kabuğunda yorumlanır: kabuk metakarakterleri
+ * kaçırılmazsa "P@ss&w0rd" gibi bir şifre bozulur ya da komut olarak çalışır.
+ * Boşluk → %s (input text sözdizimi).
+ */
+export const escapeInputText = (s) => String(s).replace(/([\\'"`$&|;<>()[\]{}*?!~#^])/g, '\\$1').replace(/ /g, '%s');
+export const typeText = (s) => adb('shell', 'input', 'text', escapeInputText(s));
+export const swipe = (x1, y1, x2, y2, ms = 350) => adb('shell', 'input', 'swipe', String(x1), String(y1), String(x2), String(y2), String(ms));
 // Alanı temizle: sona git + 40× DEL (tek input çağrısında, hızlı)
 export const clearField = () => adb('shell', 'input', 'keyevent', 'KEYCODE_MOVE_END', ...Array(40).fill('67'));
 export const back = () => adb('shell', 'input', 'keyevent', 'KEYCODE_BACK');

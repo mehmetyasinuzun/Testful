@@ -7,6 +7,8 @@ package: dev.testful.demo
 preconditions:
   - reset-app
 steps:
+  - do: "test hesabıyla giriş yap"
+    expect: "ana ekran görünür"
   - do: "Profil'e dokun"
     expect: "Profil ekranı açılır, 'Kaydet' butonu görünür"
   - do: "isim alanına 'Ayse' yaz ve Kaydet'e dokun"

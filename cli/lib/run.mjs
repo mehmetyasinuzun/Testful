@@ -1,22 +1,39 @@
 import { mkdirSync, writeFileSync, readdirSync, existsSync, readFileSync, copyFileSync } from 'node:fs';
 import { join, basename, resolve } from 'node:path';
-import { execSync, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
+import { resolveMaestro, spawnArgs } from './platform.mjs';
 import { adb, requireDevice, setAnimations, resetApp, launch, scanLogcat } from './device.mjs';
 import { qlog } from './log.mjs';
 import { applyMatrixState } from './matrix.mjs';
 
 function getMaestroCmd() {
-  try {
-    execSync('maestro --version', { stdio: 'ignore' });
-    return 'maestro';
-  } catch {}
-  if (existsSync('C:\\dev\\maestro\\bin\\maestro.bat')) {
-    return 'C:\\dev\\maestro\\bin\\maestro.bat';
-  }
-  if (existsSync('C:\\dev\\maestro\\bin\\maestro')) {
-    return 'C:\\dev\\maestro\\bin\\maestro';
-  }
-  throw new Error('Maestro CLI bulunamadı. Lütfen "testful setup" çalıştırın.');
+  const m = resolveMaestro();
+  if (!m) throw new Error('Maestro CLI bulunamadı. "testful setup" çalıştırın ya da https://docs.maestro.dev');
+  return m;
+}
+
+/**
+ * Akışlara geçirilecek değişkenler: TESTFUL_LOGIN_* ve MAESTRO_* ortam değişkenleri
+ * `-e KEY=VALUE` olarak verilir; akışta ${TESTFUL_LOGIN_USER} şeklinde kullanılır.
+ * Gizli değerler (şifre) böylece senaryo dosyasına yazılmaz.
+ */
+/** Log/artifact'a yazılan metinden gizli değerleri (şifre, OTP, token) maskeler. */
+export function redact(text, env = process.env) {
+  const secrets = Object.keys(env)
+    .filter((k) => /^(TESTFUL_LOGIN_|MAESTRO_)/.test(k) && /PASS|OTP|TOKEN|SECRET|KEY/i.test(k))
+    .map((k) => env[k])
+    .filter((v) => v && v.length >= 3)
+    .sort((a, b) => b.length - a.length);
+  let out = String(text);
+  for (const v of secrets) out = out.split(v).join('***');
+  return out;
+}
+
+export function flowEnvArgs(env = process.env) {
+  return Object.keys(env)
+    .filter((k) => /^(TESTFUL_LOGIN_|MAESTRO_)/.test(k) && env[k] !== '')
+    .sort()
+    .flatMap((k) => ['-e', `${k}=${env[k]}`]);
 }
 
 export async function runSuite({ appDir, glob = '*', matrix = [] }) {
@@ -54,20 +71,21 @@ export async function runSuite({ appDir, glob = '*', matrix = [] }) {
   
   const executeFlow = (flowPath, logPath) => {
     try {
-      const res = spawnSync(maestro, ['test', flowPath], {
+      const s = spawnArgs(maestro, ['test', ...flowEnvArgs(), flowPath]);
+      const res = spawnSync(s.cmd, s.args, {
         cwd: shotsDir,
         stdio: 'pipe',
         encoding: 'utf8',
-        shell: true
+        shell: s.shell,
       });
       if (res.error) {
-        writeFileSync(logPath, `Spawning hatası: ${res.error.message}\nCode: ${res.error.code}`);
+        writeFileSync(logPath, redact(`Spawning hatası: ${res.error.message}\nCode: ${res.error.code}`));
         return false;
       }
-      writeFileSync(logPath, (res.stdout || '') + '\n' + (res.stderr || ''));
+      writeFileSync(logPath, redact((res.stdout || '') + '\n' + (res.stderr || '')));
       return res.status === 0;
     } catch (e) {
-      writeFileSync(logPath, `İstisna: ${e.message}`);
+      writeFileSync(logPath, redact(`İstisna: ${e.message}`));
       return false;
     }
   };

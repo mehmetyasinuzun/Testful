@@ -1,59 +1,64 @@
-import { execFileSync, execSync } from 'node:child_process';
-import { join } from 'node:path';
+import { execFileSync, execSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import { qlog } from './log.mjs';
+import { IS_WIN, resolveAvdManager, resolveEmulator, resolveMaestro, resolvePatrol, resolveSdkManager, spawnArgs } from './platform.mjs';
 
-const SDK = join(process.env.LOCALAPPDATA || '', 'Android', 'Sdk');
-const bin = (p) => join(SDK, p);
-const run = (cmd, args) => execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+/** SDK aracını çalıştırır (Windows .bat için shell + tırnaklama platform katmanında). */
+function sdk(tool, args, opts = {}) {
+  const s = spawnArgs(tool, args);
+  return execFileSync(s.cmd, s.args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], shell: s.shell, ...opts });
+}
 
-function checkCommand(cmd) {
-  try {
-    execSync(cmd + ' --version', { stdio: 'ignore' });
-    return true;
-  } catch {
-    try {
-      execSync(cmd + ' version', { stdio: 'ignore' });
-      return true;
-    } catch {
-      return false;
-    }
-  }
+/** Kurulu Java ana sürümü (8, 17, 21…) ya da null. */
+export function javaVersion() {
+  const r = spawnSync('java', ['-version'], { encoding: 'utf8' });
+  return parseJavaVersion(`${r.stderr || ''}${r.stdout || ''}`);
+}
+
+/** `java -version` çıktısından ana sürüm: "1.8.0_x" → 8, "17.0.2" → 17. */
+export function parseJavaVersion(text) {
+  const m = /version "(\d+)(?:\.(\d+))?/.exec(text || '');
+  if (!m) return null;
+  return m[1] === '1' ? Number(m[2]) : Number(m[1]);
 }
 
 export function setup({ avd = 'testful' } = {}) {
   qlog('=== testful setup ===');
 
-  // 1) sistem imajı var mı?
-  let images = [];
-  try {
-    images = run(bin('cmdline-tools/latest/bin/avdmanager.bat'), ['list', 'device'])
-      .length ? runList() : [];
-  } catch {}
-  function runList() {
-    try {
-      const out = run(bin('cmdline-tools/latest/bin/sdkmanager.bat'), ['--list_installed']);
-      return out.split('\n').filter((l) => l.includes('system-images;')).map((l) => l.trim().split(/\s+/)[0]);
-    } catch { return []; }
+  const sdkmanager = resolveSdkManager();
+  const avdmanager = resolveAvdManager();
+  if (!sdkmanager || !avdmanager) {
+    qlog('[EKSİK] Android SDK cmdline-tools bulunamadı (sdkmanager/avdmanager).');
+    qlog('  Android Studio → SDK Manager → "Android SDK Command-line Tools" kur, ya da ANDROID_HOME ayarla.');
+    return false;
   }
-  const installed = runList();
-  const img = installed.find((i) => /google_apis(_playstore)?;x86_64/.test(i)) || installed[0];
+
+  // 1) sistem imajı var mı?
+  let installed = [];
+  try {
+    installed = sdk(sdkmanager, ['--list_installed'])
+      .split('\n').filter((l) => l.includes('system-images;')).map((l) => l.trim().split(/\s+/)[0]);
+  } catch {}
+  // Host mimarisine uygun imaj: Apple Silicon → arm64-v8a, diğerleri → x86_64
+  const abi = process.arch === 'arm64' ? 'arm64-v8a' : 'x86_64';
+  const img = installed.find((i) => new RegExp(`google_apis(_playstore)?;${abi}`).test(i)) || installed[0];
   if (!img) {
     qlog('[EKSİK] Android sistem imajı yok. İnternetin varken:');
-    qlog(`  ${bin('cmdline-tools/latest/bin/sdkmanager.bat')} "system-images;android-35;google_apis;x86_64"`);
+    qlog(`  "${sdkmanager}" "system-images;android-35;google_apis;${abi}"`);
     return false;
   }
   qlog(`[TAMAM] sistem imajı: ${img}`);
 
   // 2) AVD var mı? yoksa oluştur (bedava, imajdan)
   let avds = '';
-  try { avds = run(bin('cmdline-tools/latest/bin/avdmanager.bat'), ['list', 'avd']); } catch {}
+  try { avds = sdk(avdmanager, ['list', 'avd']); } catch {}
   if (avds.includes(`Name: ${avd}`)) {
     qlog(`[TAMAM] AVD "${avd}" zaten var`);
   } else {
     qlog(`[..] AVD "${avd}" oluşturuluyor (${img})`);
     try {
-      execSync(`echo no | "${bin('cmdline-tools/latest/bin/avdmanager.bat')}" create avd -n ${avd} -k "${img}" -d pixel_7`, { stdio: 'inherit', shell: true });
+      // "Do you wish to create a custom hardware profile?" sorusuna stdin'den 'no'
+      sdk(avdmanager, ['create', 'avd', '-n', avd, '-k', img, '-d', 'pixel_7'], { input: 'no\n', stdio: ['pipe', 'inherit', 'inherit'] });
       qlog(`[TAMAM] AVD "${avd}" oluşturuldu`);
     } catch (e) {
       qlog(`[HATA] AVD oluşturulamadı: ${e.message}`);
@@ -61,26 +66,25 @@ export function setup({ avd = 'testful' } = {}) {
     }
   }
 
-  // 3) Java 17+ kontrolü
-  let javaOk = false;
-  try {
-    const javaVer = execSync('java -version', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-    javaOk = /version "(1[789]|2[0123])/.test(javaVer) || / (1[789]|2[0123])\./.test(javaVer);
-    qlog(`[TAMAM] Java kurulu: ${javaVer.split('\n')[0].trim()}`);
-  } catch {
-    qlog('[EKSİK] Java 17+ bulunamadı. Java Maestro için zorunludur.');
-  }
+  // 3) Java 17+ kontrolü (java -version çıktısını stderr'e yazar)
+  const javaVer = javaVersion();
+  if (javaVer === null) qlog('[EKSİK] Java bulunamadı. Maestro için JDK 17+ zorunludur.');
+  else if (javaVer < 17) qlog(`[EKSİK] Java ${javaVer} kurulu; Maestro için JDK 17+ gerekli.`);
+  else qlog(`[TAMAM] Java ${javaVer}`);
 
   // 4) Maestro CLI kontrolü ve otomatik kurulumu
-  let maestroOk = checkCommand('maestro');
-  const localMaestroBin = 'C:\\dev\\maestro\\bin\\maestro';
-  if (!maestroOk && existsSync(localMaestroBin)) {
-    maestroOk = true;
-    qlog(`[TAMAM] Maestro bulundu: ${localMaestroBin}`);
-  }
-
-  if (maestroOk) {
-    qlog('[TAMAM] Maestro zaten yüklü.');
+  const maestro = resolveMaestro();
+  if (maestro) {
+    qlog(`[TAMAM] Maestro zaten yüklü (${maestro}).`);
+  } else if (!IS_WIN) {
+    // macOS/Linux: Maestro'nun resmi kurulum betiği (~/.maestro/bin)
+    qlog('[..] Maestro kuruluyor (resmi betik: get.maestro.mobile.dev)...');
+    try {
+      execSync('curl -fsSL "https://get.maestro.mobile.dev" | bash', { stdio: 'inherit', shell: '/bin/bash' });
+      qlog('[TAMAM] Maestro kuruldu (~/.maestro/bin). Yeni terminalde PATH aktif olur.');
+    } catch (e) {
+      qlog(`[UYARI] Maestro otomatik kurulamadı: ${e.message} → https://docs.maestro.dev`);
+    }
   } else {
     qlog('[..] Maestro kurulu değil. Otomatik kurulum başlatılıyor...');
     try {
@@ -107,8 +111,7 @@ export function setup({ avd = 'testful' } = {}) {
   }
 
   // 5) Patrol CLI kontrolü
-  let patrolOk = checkCommand('patrol');
-  if (patrolOk) {
+  if (resolvePatrol()) {
     qlog('[TAMAM] Patrol CLI kurulu.');
   } else {
     qlog('[EKSİK] Patrol CLI kurulu değil (Flutter derin mod için gerekebilir).');
@@ -118,7 +121,7 @@ export function setup({ avd = 'testful' } = {}) {
   qlog('');
   qlog('Kurulum adımları tamamlandı.');
   qlog('Ayrı bir terminalde emülatörü başlatın:');
-  qlog(`  ${bin('emulator/emulator.exe')} -avd ${avd} -no-boot-anim`);
+  qlog(`  "${resolveEmulator() || 'emulator'}" -avd ${avd} -no-boot-anim`);
   qlog('Ardından sağlık kontrolü yapın:');
   qlog('  node cli/testful.mjs doctor');
   

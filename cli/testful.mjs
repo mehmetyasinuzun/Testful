@@ -16,9 +16,15 @@ kullanım:
                                                   (seçiciler GERÇEK a11y ağacından; çok-satır
                                                   düğümlere [\\s\\S]* önerisi, etiketsiz alanlara
                                                   a11y bayrağı + merkez koordinat)
-  testful map --pkg <package> [--out <dir>] [--max N] [--no-clear]
+  testful map --pkg <package> [--out <dir>] [--max N] [--max-minutes M] [--no-clear]
                                                   otonom keşif: ekran haritası + graph.json +
-                                                  KAPSAMA METRİĞİ; engelde alan doldurma sezgisi
+                                                  KAPSAMA METRİĞİ; kaydırma, giriş/OTP formu
+                                                  (TESTFUL_LOGIN_USER/_PASSWORD/_OTP), gezinme
+  testful judge [--map <dir>] [--max-screens N] [--model id] [--effort low|medium|high]
+                                                  görsel hakem: haritadaki her benzersiz ekranı
+                                                  Claude ile değerlendirir → judge.json
+                                                  (ANTHROPIC_API_KEY gerekir; dokunma hedefi
+                                                  kontrolü AI'sız)
   testful run <app_dir> [id_glob] [--matrix list] senaryo paketi (3x retry + flaky karantina)
                                                   örnek matrix: --matrix dark,large-font,landscape,offline
                                                   env: TESTFUL_PRELAUNCH=1 → launch adb ile
@@ -54,7 +60,18 @@ try {
       pkg,
       out: arg('--out', '.qa/map'),
       maxActions: Number(arg('--max', '80')),
+      maxMinutes: Number(arg('--max-minutes', '10')),
       clear: !process.argv.includes('--no-clear'),
+    });
+  } else if (cmd === 'judge') {
+    const { judge, DEFAULT_MODEL } = await import('./lib/judge.mjs');
+    const mapDir = arg('--map', '.qa/map');
+    await judge({
+      mapDir,
+      out: arg('--out', join(mapDir, 'judge.json')),
+      model: arg('--model', DEFAULT_MODEL),
+      effort: arg('--effort', 'medium'),
+      maxScreens: Number(arg('--max-screens', '12')),
     });
   } else if (cmd === 'run') {
     const appDir = process.argv[3];
