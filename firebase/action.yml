@@ -1,0 +1,105 @@
+name: Testful — Firebase Test Lab (Robo)
+description: APK'yı Firebase Test Lab'da Google'ın gerçek/sanal cihazlarında Robo testiyle koşar; sonucu iş özetine ve artifact'a yazar. (Test Lab 30 Eylül 2027'de kapanıyor.)
+author: Mehmet Yasin UZUN
+branding:
+  icon: smartphone
+  color: orange
+
+inputs:
+  apk-path:
+    description: Test edilecek APK.
+    required: true
+  gcp-credentials-json:
+    description: Servis hesabı JSON anahtarı (Secrets). Ya bu ya da Workload Identity Federation girdileri.
+    default: ''
+  workload-identity-provider:
+    description: (Önerilen, anahtarsız) WIF sağlayıcısı, örn. projects/123/locations/global/workloadIdentityPools/gh/providers/gh
+    default: ''
+  service-account:
+    description: WIF ile kullanılacak servis hesabı e-postası.
+    default: ''
+  project-id:
+    description: Firebase/GCP proje kimliği. Boşsa kimlik bilgisinden alınır.
+    default: ''
+  devices:
+    description: Satır başına bir cihaz (gcloud --device). Ücretsiz kota (Spark) günde 10 sanal + 5 fiziksel test.
+    default: model=MediumPhone.arm,version=33
+  timeout:
+    description: Cihaz başına en uzun süre.
+    default: 5m
+  robo-directives:
+    description: "Robo yönergeleri, örn. text:email=qa@x.com,text:password=..., click:login_btn= (resource-id adlarıyla)"
+    default: ''
+  fail-on:
+    description: "failure (test kalırsa kırmızı) · never. Test Lab altyapı hataları her zaman yalnız uyarıdır."
+    default: failure
+  artifact-name:
+    description: Sonuç artifact adı.
+    default: testful-firebase
+
+outputs:
+  verdict:
+    description: pass | fail | infra | error
+    value: ${{ steps.summary.outputs.verdict }}
+
+runs:
+  using: composite
+  steps:
+    - name: Kimlik bilgisi kontrolü
+      shell: bash
+      env:
+        HAS_KEY: ${{ inputs.gcp-credentials-json != '' }}
+        HAS_WIF: ${{ inputs.workload-identity-provider != '' && inputs.service-account != '' }}
+      run: |
+        if [ "$HAS_KEY" != "true" ] && [ "$HAS_WIF" != "true" ]; then
+          echo "::error::Firebase Test Lab için gcp-credentials-json ya da workload-identity-provider + service-account gerekli (docs/CI.md → Firebase Test Lab)."
+          exit 1
+        fi
+
+    - uses: google-github-actions/auth@v2
+      with:
+        credentials_json: ${{ inputs.gcp-credentials-json }}
+        workload_identity_provider: ${{ inputs.workload-identity-provider }}
+        service_account: ${{ inputs.service-account }}
+        project_id: ${{ inputs.project-id }}
+
+    - uses: google-github-actions/setup-gcloud@v2
+
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+
+    - name: Robo testi
+      shell: bash
+      env:
+        APK: ${{ inputs.apk-path }}
+        OUT: ${{ runner.temp }}/testful-firebase
+        DEVICES: ${{ inputs.devices }}
+        TIMEOUT: ${{ inputs.timeout }}
+        ROBO_DIRECTIVES: ${{ inputs.robo-directives }}
+        PROJECT: ${{ inputs.project-id }}
+      run: bash "$GITHUB_ACTION_PATH/../ci/firebase-robo.sh"
+
+    - id: summary
+      if: always()
+      name: Özet ve karar
+      shell: bash
+      continue-on-error: true
+      env:
+        OUT: ${{ runner.temp }}/testful-firebase
+        FAIL_ON: ${{ inputs.fail-on }}
+        ARTIFACT_NAME: ${{ inputs.artifact-name }}
+      run: node "$GITHUB_ACTION_PATH/../ci/firebase-summary.mjs"
+
+    - if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ runner.temp }}/testful-firebase
+        if-no-files-found: ignore
+        retention-days: 14
+
+    - if: always() && steps.summary.outcome == 'failure'
+      name: Firebase Test Lab sonucu
+      shell: bash
+      run: exit 1

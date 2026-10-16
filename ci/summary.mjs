@@ -5,6 +5,7 @@
 // env: OUT PKG FAIL_ON(scenario|crash|never) MONKEY_EVENTS ARTIFACT_NAME
 import { readFileSync, writeFileSync, existsSync, appendFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { crashHits, HARD_KINDS } from '../cli/lib/crash.mjs';
 
 const OUT = process.env.OUT || 'testful-out';
 const PKG = process.env.PKG || '';
@@ -19,40 +20,13 @@ const steps = Object.fromEntries(
 );
 const graph = readJson(join(OUT, 'map', 'graph.json'));
 const report = readJson(join(OUT, 'run', 'report.json'));
+const judged = readJson(join(OUT, 'judge.json'));
 
-// --- Çökme imzaları: yalnız hedef pakete ait olanlar (sistem gürültüsü sayılmaz) ---
-export function crashHits(text, pkg, source) {
-  const lines = text.split('\n');
-  const hits = [];
-  const esc = pkg.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const anr = new RegExp(`ANR in ${esc}\\b`);
-  const native = new RegExp(`>>> ${esc} <<<`);
-  for (let i = 0; i < lines.length; i++) {
-    const l = lines[i];
-    let kind = null;
-    if (/FATAL EXCEPTION/.test(l) && lines.slice(i + 1, i + 3).some((n) => n.includes(`Process: ${pkg},`))) kind = 'çökme';
-    else if (anr.test(l)) kind = 'ANR';
-    else if (native.test(l)) kind = 'native çökme';
-    else if (/E\/flutter|E flutter/.test(l)) kind = 'flutter hatası';
-    else if (/RenderFlex overflowed/.test(l)) kind = 'taşma (overflow)';
-    if (kind) {
-      // çökme: aynı AndroidRuntime bloğunun ilk satırları (yığın izinin başı)
-      let end = i + 1;
-      if (kind === 'çökme') while (end < lines.length && end < i + 8 && /AndroidRuntime/.test(lines[end])) end++;
-      const ctx = lines.slice(i, end).map((s) => s.trim()).join('\n');
-      hits.push({ kind, source, line: i + 1, text: ctx });
-    }
-  }
-  return hits;
-}
-
-const crashes = PKG
-  ? [
-      ...crashHits(readText(join(OUT, 'logcat.txt')), PKG, 'keşif+senaryo'),
-      ...crashHits(readText(join(OUT, 'monkey-logcat.txt')), PKG, 'monkey'),
-    ]
-  : [];
-const hardCrashes = crashes.filter((c) => c.kind === 'çökme' || c.kind === 'ANR' || c.kind === 'native çökme');
+// logcat.txt koşunun tamamını (monkey dahil) kesintisiz kapsar → sayım buradan;
+// monkey-logcat.txt yalnız kaos satırındaki atıf için.
+const crashes = PKG ? crashHits(readText(join(OUT, 'logcat.txt')), PKG, 'koşu') : [];
+const monkeyCrashes = PKG ? crashHits(readText(join(OUT, 'monkey-logcat.txt')), PKG, 'monkey') : [];
+const hardCrashes = crashes.filter((c) => HARD_KINDS.has(c.kind));
 
 // --- a11y: haritadaki etiketsiz etkileşimli öğeler ---
 const a11y = [];
@@ -90,7 +64,8 @@ L.push('', '| Adım | Durum |', '|---|---|');
 L.push(`| Kurulum | ${ok(steps.install === 'ok')} |`);
 if (graph) {
   const s = graph.stats;
-  L.push(`| Otonom keşif | ✅ ${s.screens} ekran · ${s.edges} geçiş · ${s.actions} dokunuş · kapsama ~%${s.coverage_pct} |`);
+  const extra = [s.scrolls ? `${s.scrolls} kaydırma` : '', s.forms_submitted ? `${s.forms_submitted} form` : '', s.risky_skipped ? `${s.risky_skipped} riskli öğe atlandı` : ''].filter(Boolean);
+  L.push(`| Otonom keşif | ✅ ${s.screens} ekran · ${s.edges} geçiş · ${s.actions} dokunuş · kapsama ~%${s.coverage_pct}${extra.length ? ` · ${extra.join(' · ')}` : ''} |`);
 } else if (steps.install === 'ok') {
   L.push('| Otonom keşif | ❌ harita çıkmadı |');
 }
@@ -101,7 +76,7 @@ if (report) {
   L.push(`| Senaryolar | ${steps.run === 'skipped' ? '⏭️ `.qa/scenarios/` yok' : '❌ rapor üretilmedi'} |`);
 }
 if (steps.monkey && steps.monkey !== 'skipped') {
-  const m = crashes.filter((c) => c.source === 'monkey');
+  const m = monkeyCrashes;
   L.push(`| Kaos (monkey ${process.env.MONKEY_EVENTS || ''} olay) | ${m.length ? `⚠️ ${m.length} imza` : '✅ temiz'} |`);
 }
 L.push(`| Çökme / ANR | ${hardCrashes.length ? `⚠️ ${hardCrashes.length}` : '✅ yok'} |`);
@@ -138,6 +113,23 @@ if (crashes.length) {
   L.push('<details><summary>Çökme imzaları (ilk 10)</summary>', '');
   for (const c of crashes.slice(0, 10)) L.push(`**${c.kind}** · ${c.source} · satır ${c.line}`, '```', c.text.slice(0, 800), '```');
   L.push('</details>', '');
+}
+
+if (judged) {
+  const all = judged.screens.flatMap((sc) => sc.findings.map((f) => ({ ...f, order: sc.order, sig: sc.sig })));
+  const rank = { kritik: 0, yüksek: 1, orta: 2, düşük: 3 };
+  all.sort((a, b) => (rank[a.severity] ?? 9) - (rank[b.severity] ?? 9));
+  const errors = judged.screens.filter((sc) => sc.error).length;
+  L.push(`<details><summary>Görsel değerlendirme — ${all.length} bulgu · ${judged.judged} ekran${judged.skipped ? ` (+${judged.skipped} atlandı)` : ''}${errors ? ` · ${errors} hata` : ''} · ${judged.model}</summary>`, '');
+  L.push('> Görsel bulgular en düşük kanıt seviyesidir (logcat > assert > görsel): öneri niteliğindedir, CI\'ı kırmızı yapmaz. Dokunma hedefi bulguları deterministiktir.', '');
+  if (all.length) {
+    L.push('| Önem | Güven | Ekran | Bulgu | Nerede |', '|---|---|---|---|---|');
+    for (const f of all.slice(0, 30)) {
+      const cell = (t) => String(t || '').replace(/\|/g, '\\|').replace(/\n/g, ' ');
+      L.push(`| ${f.severity} | ${f.confidence} | ${f.order} | **${cell(f.title)}** — ${cell(f.detail)} | ${cell(f.location)} |`);
+    }
+  }
+  L.push('', `Token: ${judged.usage.input_tokens} girdi + ${judged.usage.output_tokens} çıktı.`, '', '</details>', '');
 }
 
 if (a11y.length) {

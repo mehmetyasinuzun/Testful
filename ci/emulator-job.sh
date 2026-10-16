@@ -77,14 +77,20 @@ rec_merge() {
 
 echo "::group::Kurulum ($PKG)"
 adb wait-for-device
+# Logcat'i koşu boyunca kesintisiz dosyaya akıt: cihazdaki halka tampon küçüktür
+# (~256KB) ve sonradan "logcat -d" ile alınınca hata anı çoktan silinmiş olur.
+adb logcat -G 16M >/dev/null 2>&1 || true
 adb logcat -c || true
+adb logcat -v threadtime > "$OUT/logcat.txt" 2>/dev/null &
+LOGCAT_PID=$!
+trap 'kill "$LOGCAT_PID" 2>/dev/null' EXIT
 if adb install -r -g "$APK"; then step install ok; else step install fail; echo "::endgroup::"; exit 0; fi
 $T animations off || true
 echo "::endgroup::"
 
 echo "::group::Otonom keşif (map, en çok $MAX_ACTIONS eylem)"
 rec_start 1-kesif
-if $T map --pkg "$PKG" --out "$OUT/map" --max "$MAX_ACTIONS"; then step map ok; else step map fail; fi
+if $T map --pkg "$PKG" --out "$OUT/map" --max "$MAX_ACTIONS" --max-minutes "${MAX_MINUTES:-8}"; then step map ok; else step map fail; fi
 rec_stop
 echo "::endgroup::"
 
@@ -109,8 +115,6 @@ else
   step run skipped
 fi
 
-adb logcat -d > "$OUT/logcat.txt" 2>/dev/null || true
-
 if [ "${MONKEY_EVENTS:-0}" -gt 0 ] 2>/dev/null; then
   echo "::group::Kaos (monkey, $MONKEY_EVENTS olay, seed 42)"
   rec_start 3-kaos
@@ -123,6 +127,7 @@ fi
 
 # Son durumun ekran görüntüsü (çökme sonrası teşhis için).
 adb exec-out screencap -p > "$OUT/final.png" 2>/dev/null || true
+kill "$LOGCAT_PID" 2>/dev/null; wait "$LOGCAT_PID" 2>/dev/null
 rec_merge
 rm -f "$OUT/.start" "$OUT/.rec-stop"
 exit 0

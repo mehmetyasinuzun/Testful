@@ -1,4 +1,6 @@
-# Testful'un kendi CI'ı: CLI/script kontrolleri + demo uygulamada gerçek emülatörde uçtan uca koşu.
+# Testful'un kendi CI'ı:
+#  - unit: birim + keşif motoru testleri (sahte cihaz) Linux/macOS/Windows'ta
+#  - e2e: demo uygulamada gerçek emülatörde uçtan uca koşu + beklenti doğrulamaları
 name: Testful self-test
 
 on:
@@ -16,22 +18,35 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  checks:
-    runs-on: ubuntu-latest
+  unit:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: '20' }
+        with: { node-version: '22', cache: npm }
+      - run: npm ci --no-audit --no-fund
+      - run: npm test
       - name: Sözdizimi (node + bash)
+        if: runner.os == 'Linux'
         run: |
           for f in cli/*.mjs cli/lib/*.mjs ci/*.mjs; do node --check "$f"; done
-          for f in ci/*.sh; do bash -n "$f"; done
-      - name: ci-init şablonu üretir
+          for f in ci/*.sh .claude/skills/mobile-ux-test/scripts/*.sh; do bash -n "$f"; done
+      - name: ci-init şablonu üretir, üzerine yazmayı reddeder
+        shell: bash
         run: |
           d="$(mktemp -d)"
           node cli/testful.mjs ci-init "$d"
           grep -q 'mehmetyasinuzun/Testful/.github/workflows/testful.yml@main' "$d/.github/workflows/testful.yml"
-          ! node cli/testful.mjs ci-init "$d"   # üzerine yazmayı reddetmeli
+          ! node cli/testful.mjs ci-init "$d"
+      - name: CLI cihazsız açılır (help + doctor eksikleri raporlar)
+        shell: bash
+        run: |
+          node cli/testful.mjs > /dev/null
+          node cli/testful.mjs doctor || true
 
   e2e:
     runs-on: ubuntu-latest
@@ -43,32 +58,55 @@ jobs:
         with:
           working-directory: examples/demo-app
           fail-on: crash
+          max-actions: '80'
           monkey-events: '500'
           artifact-name: testful-demo-report
+          # Demo uygulamanın HERKESE AÇIK hesabı (gizli değil). Gerçek projede Secrets'tan ver.
+          login-user: demo@testful.dev
+          login-password: Demo&1234
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          judge-max-screens: '4'
       - name: Demo beklentilerini doğrula
         env:
           OUT: ${{ steps.testful.outputs.report-dir }}
         run: |
           node - <<'JS'
           const fs = require('fs');
-          const g = JSON.parse(fs.readFileSync(`${process.env.OUT}/map/graph.json`, 'utf8'));
-          const r = JSON.parse(fs.readFileSync(`${process.env.OUT}/run/report.json`, 'utf8'));
-          const fail = (m) => { console.error(`::error::${m}`); process.exitCode = 1; };
-          if (g.stats.screens < 3) fail(`keşif en az 3 ekran bulmalı, bulunan: ${g.stats.screens}`);
-          // demo 4 ekran (+ form durumları); fazlası metin alanı içeriğinin ekran sayıldığı anlamına gelir
-          if (g.stats.screens > 8) fail(`ekran sayısı şişti (${g.stats.screens}) — ekran kimliği yazılan metne bağlı olmamalı`);
-          // Android butonları büyük harfle gösterebilir (PROFIL)
+          const OUT = process.env.OUT;
+          const g = JSON.parse(fs.readFileSync(`${OUT}/map/graph.json`, 'utf8'));
+          const r = JSON.parse(fs.readFileSync(`${OUT}/run/report.json`, 'utf8'));
+          const fail = (m) => { console.log(`::error::${m}`); process.exitCode = 1; };
           const labels = Object.values(g.nodes).flatMap((n) => n.interactives.map((e) => (e.label || '').toLowerCase()));
-          if (!labels.includes('profil')) fail('ana ekrandaki "Profil" butonu haritada yok');
-          const shots = fs.existsSync(`${process.env.OUT}/run/screenshots`) ? fs.readdirSync(`${process.env.OUT}/run/screenshots`) : [];
-          if (!shots.some((f) => f.startsWith('DEMO-01'))) fail(`senaryo ekran görüntüleri toplanmadı: ${shots}`);
-          const vids = fs.existsSync(`${process.env.OUT}/video`) ? fs.readdirSync(`${process.env.OUT}/video`) : [];
-          for (const v of ['1-kesif.mp4', '2-senaryolar.mp4', '3-kaos.mp4']) {
-            const p = `${process.env.OUT}/video/${v}`;
-            if (!vids.includes(v) || fs.statSync(p).size < 10000) fail(`video eksik/boş: ${v} (bulunan: ${vids})`);
-          }
+
+          // Keşif: giriş duvarını geçti, kaydırdı, şişmedi, riskliye dokunmadı
+          if (g.stats.forms_submitted < 1) fail('giriş formu gönderilmedi');
+          if (!labels.includes('profil')) fail('giriş sonrası ana ekran keşfedilmedi');
+          if (!labels.includes('ürün 25')) fail('kaydırma ile listenin sonu bulunamadı');
+          if (!labels.includes('sepete ekle')) fail('kaydırma sonrası açılan detay ekranı bulunamadı');
+          if (g.stats.screens > 14) fail(`ekran sayısı şişti (${g.stats.screens})`);
+          if (g.edges.some((e) => /hesab. sil/i.test(e.via))) fail('keşif riskli "Hesabı sil" butonuna dokundu');
           if (!Object.values(g.nodes).some((n) => n.interactives.some((e) => e.a11y_missing))) fail('etiketsiz ikon buton a11y bulgusu olarak yakalanmadı');
-          if (g.edges.some((e) => /Hesab. sil/.test(e.via))) fail('keşif riskli "Hesabı sil" butonuna dokundu');
-          if (r.totals.passed !== 2) fail(`DEMO-01/02 geçmeli, sonuç: ${JSON.stringify(r.totals)}`);
-          console.log('demo beklentileri:', g.stats, r.totals, shots, vids);
+
+          // Senaryolar: kesin hata yok; ortam kaynaklı flaky Testful'un karantinasıyla raporlanır
+          if (r.totals.failed !== 0) fail(`senaryo kaldı: ${JSON.stringify(r.totals)}`);
+          if (r.totals.passed + r.totals.flaky !== 2) fail(`DEMO-01/02 koşmalı: ${JSON.stringify(r.totals)}`);
+          if (r.totals.flaky) console.log(`::warning::flaky senaryo: ${JSON.stringify(r.totals)} (karantina — kırmızı değil)`);
+
+          // Kanıt: video, ekran görüntüsü, kesintisiz logcat
+          const shots = fs.existsSync(`${OUT}/run/screenshots`) ? fs.readdirSync(`${OUT}/run/screenshots`) : [];
+          if (!shots.some((f) => f.startsWith('DEMO-01'))) fail(`senaryo ekran görüntüleri toplanmadı: ${shots}`);
+          const vids = fs.existsSync(`${OUT}/video`) ? fs.readdirSync(`${OUT}/video`) : [];
+          for (const v of ['1-kesif.mp4', '2-senaryolar.mp4', '3-kaos.mp4']) {
+            if (!vids.includes(v) || fs.statSync(`${OUT}/video/${v}`).size < 10000) fail(`video eksik/boş: ${v} (bulunan: ${vids})`);
+          }
+          const logcat = fs.readFileSync(`${OUT}/logcat.txt`, 'utf8');
+          if (!logcat.includes('dev.testful.demo')) fail('kesintisiz logcat uygulama satırı içermiyor');
+
+          // Gizlilik: şifre hiçbir log/artifact metninde açık yazılmamalı
+          const leaks = [];
+          const walk = (d) => { for (const f of fs.readdirSync(d)) { const p = `${d}/${f}`; if (fs.statSync(p).isDirectory()) walk(p); else if (/\.(txt|json|md|log)$/.test(f) && fs.readFileSync(p, 'utf8').includes('Demo&1234')) leaks.push(p); } };
+          walk(OUT);
+          if (leaks.length) fail(`şifre artifact'a sızdı: ${leaks.join(', ')}`);
+
+          console.log('demo beklentileri:', g.stats, r.totals, { shots: shots.length, vids });
           JS
