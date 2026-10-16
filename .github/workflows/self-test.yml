@@ -106,7 +106,10 @@ jobs:
             if (!vids.includes(v) || fs.statSync(`${OUT}/video/${v}`).size < 10000) fail(`video eksik/boş: ${v} (bulunan: ${vids})`);
           }
           const smoke = JSON.parse(fs.readFileSync(`${OUT}/smoke/report.json`, 'utf8'));
-          if (smoke.kind !== 'smoke' || smoke.metrics['soğuk açılış (ms)'] == null) fail(`smoke raporu eksik: ${JSON.stringify(smoke.metrics)}`);
+          if (smoke.kind !== 'smoke' || smoke.metrics['kaos olayı'] !== 500) fail(`smoke koşmadı: ${JSON.stringify(smoke.metrics)}`);
+          if (smoke.status === 'not-ready') fail(`smoke engelleyici bulgu buldu: ${JSON.stringify(smoke.findings.map((f) => f.title))}`);
+          // am start -W her zaman TotalTime vermez; ölçülemeyen soğuk açılış bulgu değil uyarıdır
+          if (smoke.metrics['soğuk açılış (ms)'] == null) console.log('::warning::soğuk açılış süresi bu koşuda ölçülemedi');
           const logcat = fs.readFileSync(`${OUT}/logcat.txt`, 'utf8');
           if (!logcat.includes('dev.testful.demo')) fail('kesintisiz logcat uygulama satırı içermiyor');
 
